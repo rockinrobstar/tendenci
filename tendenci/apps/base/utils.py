@@ -234,6 +234,9 @@ def get_deleted_objects(objs, user):
     return to_delete, model_count, perms_needed, protected
 
 
+def get_timezone():
+    return settings.TIME_ZONE
+
 def get_timezone_choices():
     choices = []
     for tz in pytz.common_timezones:
