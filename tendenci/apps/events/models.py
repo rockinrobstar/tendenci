@@ -50,7 +50,7 @@ from tendenci.apps.payments.models import PaymentMethod as GlobalPaymentMethod
 
 from tendenci.apps.events.settings import (
     FIELD_MAX_LENGTH, LABEL_MAX_LENGTH, FIELD_TYPE_CHOICES, USER_FIELD_CHOICES, FIELD_FUNCTIONS)
-from tendenci.apps.base.utils import (localize_date, get_timezone, get_timezone_choices,
+from tendenci.apps.base.utils import (localize_date, get_timezone_choices,
     format_datetime_range)
 from tendenci.apps.emails.models import Email
 from tendenci.libs.boto_s3.utils import set_s3_file_permission
@@ -2692,7 +2692,7 @@ class Event(TendenciBaseModel):
     all_day = models.BooleanField(default=False)
     start_dt = models.DateTimeField()
     end_dt = models.DateTimeField()
-    timezone = TimeZoneField(verbose_name=_('Time Zone'), default=get_timezone(), choices=get_timezone_choices(), max_length=100)
+    timezone = TimeZoneField(verbose_name=_('Time Zone'), default='US/Central', choices=get_timezone_choices(), max_length=100)
     place = models.ForeignKey('Place', null=True, on_delete=models.SET_NULL)
     registration_configuration = models.OneToOneField('RegistrationConfiguration', null=True, editable=False, on_delete=models.CASCADE)
     mark_registration_ended = models.BooleanField(_('Registration Ended'), default=False)
