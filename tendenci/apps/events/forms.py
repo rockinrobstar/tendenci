@@ -1203,12 +1203,11 @@ class EventForm(TendenciBaseForm):
 
         if self.cleaned_data.get('remove_photo'):
             event.image = None
-            
+
         primary_group = self.cleaned_data.get('primary_group', None)
         if primary_group:
-            for groupevent in event.group_relations.exclude(group=primary_group):
-                groupevent.is_primary = False
-                groupevent.save()
+            event.primary_group_selected = primary_group
+
         return event
 
 
@@ -2935,7 +2934,7 @@ class UserRegistrationForm(UserMemberRegBaseForm):
     """
     User Registration form.
     """
-    user_display = forms.CharField(max_length=80,
+    user_display = forms.CharField(max_length=300,
                         label=_('User'),
                         required=False,
                         help_text=_('Type name or username or email, then press the down arrow key to select a suggestion'))
