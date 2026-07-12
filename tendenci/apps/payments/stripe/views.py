@@ -80,7 +80,7 @@ def acct_onboarding(request, template_name='payments/stripe/connect/acct_onboard
             if not err_msg:
                 # save the stripe account to db
                 sa = onboarding_form.save(commit=False)
-                sa.stripe_user_id = acct.stripe_id
+                sa.stripe_user_id = acct.id
                 sa.status_detail = 'not completed'
                 sa.creator = sa.owner = request.user
                 sa.creator_username = sa.owner_username = request.user.username
@@ -307,16 +307,14 @@ class FetchAccessToken(View):
             stripe.api_version = settings.STRIPE_API_VERSION
             stripe_set_app_info(stripe)
             account = stripe.Account.retrieve(stripe_user_id)
-            sa.account_name = account.get('display_name', '')
+            sa.account_name = getattr(account, 'display_name', '') or ''
             if not sa.account_name:
-                business_profile = account.get('business_profile')
+                business_profile = getattr(account, 'business_profile', None)
                 if business_profile:
-                    sa.account_name = business_profile.get('name') or '' 
-            sa.email = account.get('email', '')
-            if sa.email is None:
-                sa.email = ''
-            sa.default_currency = account.get('default_currency', '')
-            sa.country = account.get('country', '')
+                    sa.account_name = getattr(business_profile, 'name', None) or ''
+            sa.email = getattr(account, 'email', '') or ''
+            sa.default_currency = getattr(account, 'default_currency', '') or ''
+            sa.country = getattr(account, 'country', '') or ''
             sa.save()
         
             msg_string = _('Success!')
