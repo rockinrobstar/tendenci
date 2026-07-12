@@ -1,5 +1,4 @@
 #import os
-import math
 import json
 #from datetime import datetime
 
@@ -28,8 +27,12 @@ from tendenci.apps.theme.shortcuts import themed_response as render_to_resp
 from tendenci.apps.payments.utils import payment_processing_object_updates
 from tendenci.apps.payments.utils import log_payment, send_payment_notice
 from tendenci.apps.payments.models import Payment
-from .forms import StripeCardForm, BillingInfoForm, AccountOnBoardingForm
-from .utils import payment_update_stripe
+from .forms import BillingInfoForm, AccountOnBoardingForm
+from .utils import (
+    build_payment_intent_params,
+    configure_stripe,
+    payment_update_from_intent,
+)
 from tendenci.apps.site_settings.utils import get_setting
 from tendenci.apps.recurring_payments.models import RecurringPayment
 from tendenci.apps.base.http import Http403
@@ -37,11 +40,84 @@ from tendenci.apps.perms.utils import has_perm
 from tendenci.apps.base.utils import get_next_url
 
 from .models import StripeAccount
-from .utils import configure_stripe
 
 STRIPE_TOKEN_URL = 'https://connect.stripe.com/oauth/token'
 STRIPE_DEAUTHORIZE_URL = 'https://connect.stripe.com/oauth/deauthorize'
 REVOKED_STATUS_DETAIL =  'revoked'
+
+
+def _membership_for_auto_renew(payment):
+    """Return membership needing a Stripe RP profile, else None."""
+    obj = payment.invoice.get_object()
+    if not obj or not hasattr(obj, 'memberships'):
+        return None
+    memberships = obj.memberships() if callable(obj.memberships) else None
+    if not memberships:
+        return None
+    membership = memberships[0]
+    if membership.auto_renew and not membership.has_rp(platform='stripe'):
+        return membership
+    return None
+
+
+def _create_payment_intent_for_payment(payment, currency):
+    """Create Customer (if auto-renew) and PaymentIntent; return (pi, membership, customer_id)."""
+    configure_stripe(stripe)
+    membership = _membership_for_auto_renew(payment)
+    customer_id = None
+    setup_future_usage = None
+    if membership and membership.user:
+        try:
+            customer = stripe.Customer.create(
+                email=membership.user.email,
+                description='For membership auto renew',
+            )
+            customer_id = customer.id
+            setup_future_usage = 'off_session'
+        except Exception:
+            customer_id = None
+            setup_future_usage = None
+            membership = None
+
+    params = build_payment_intent_params(
+        payment,
+        currency,
+        customer_id=customer_id,
+        setup_future_usage=setup_future_usage,
+    )
+    payment_intent = stripe.PaymentIntent.create(**params)
+    return payment_intent, membership, customer_id
+
+
+def _finalize_successful_payment(request, payment, payment_intent):
+    """Mark payment approved and create RP when applicable."""
+    if payment.is_approved:
+        return
+
+    payment_update_from_intent(request, payment_intent, payment)
+    payment_processing_object_updates(request, payment)
+    log_payment(request, payment)
+    send_payment_notice(request, payment)
+
+    customer_id = getattr(payment_intent, 'customer', None)
+    if customer_id and not isinstance(customer_id, str):
+        customer_id = getattr(customer_id, 'id', None)
+    if not customer_id:
+        return
+
+    obj = payment.invoice.get_object()
+    if not obj or not hasattr(obj, 'memberships'):
+        return
+    memberships = obj.memberships() if callable(obj.memberships) else None
+    if not memberships:
+        return
+    membership = memberships[0]
+    if membership.auto_renew:
+        membership.get_or_create_rp(
+            request.user,
+            platform='stripe',
+            customer_profile_id=customer_id,
+        )
 
 
 @login_required
@@ -332,124 +408,132 @@ def pay_online(request, payment_id, guid='', template_name='payments/stripe/payo
             msg_string += str(_('Please follow the guide {0} to complete the setup process for {1}, then try again.').format(url_setup_guide, merchant_provider))
         else:
             msg_string += str(_('Please contact the site administrator to complete the setup process.'))
-            
+
         messages.add_message(request, messages.ERROR, _(msg_string))
-        
+
         payment = get_object_or_404(Payment, pk=payment_id, guid=guid)
-    
+
         return HttpResponseRedirect(reverse('invoice.view', args=[payment.invoice.id]))
-            
+
+    payment = get_object_or_404(Payment, pk=payment_id, guid=guid)
+    if payment.is_approved:
+        return HttpResponseRedirect(reverse('stripe.thank_you', args=[payment.id, payment.guid]))
+
+    currency = get_setting('site', 'global', 'currency') or 'usd'
+    billing_info_form = BillingInfoForm(instance=payment)
+    client_secret = ''
+    err_msg = ''
+
+    try:
+        payment_intent, membership, customer_id = _create_payment_intent_for_payment(
+            payment, currency)
+        client_secret = payment_intent.client_secret
+        # Stash customer id on session for finalize edge cases (optional aid)
+        if customer_id:
+            request.session['stripe_pi_customer_%s' % payment.id] = customer_id
+        if membership:
+            request.session['stripe_pi_membership_%s' % payment.id] = membership.id
+    except Exception as e:
+        err_msg = str(e)
+        messages.add_message(request, messages.ERROR, _(err_msg))
+
+    site_url = get_setting('site', 'global', 'siteurl')
+    finalize_url = site_url + reverse(
+        'stripe.finalize', args=[payment.id, payment.guid])
+    save_billing_url = reverse(
+        'stripe.save_billing', args=[payment.id, payment.guid])
+
+    return render_to_resp(
+        request=request,
+        template_name=template_name,
+        context={
+            'billing_info_form': billing_info_form,
+            'STRIPE_PUBLISHABLE_KEY': settings.STRIPE_PUBLISHABLE_KEY,
+            'payment': payment,
+            'client_secret': client_secret,
+            'finalize_url': finalize_url,
+            'save_billing_url': save_billing_url,
+        },
+    )
+
+
+@require_POST
+def save_billing(request, payment_id, guid=''):
+    payment = get_object_or_404(Payment, pk=payment_id, guid=guid)
+    if payment.is_approved:
+        return HttpResponse(
+            json.dumps({'ok': False, 'error': 'already paid'}),
+            content_type='application/json',
+            status=400,
+        )
+
+    billing_info_form = BillingInfoForm(request.POST, instance=payment)
+    if not billing_info_form.is_valid():
+        errors = {
+            field: [str(e) for e in errs]
+            for field, errs in billing_info_form.errors.items()
+        }
+        return HttpResponse(
+            json.dumps({'ok': False, 'errors': errors}),
+            content_type='application/json',
+            status=400,
+        )
+
+    billing_info_form.save()
+    return HttpResponse(
+        json.dumps({'ok': True}),
+        content_type='application/json',
+    )
+
+
+def finalize(request, payment_id, guid=''):
+    payment = get_object_or_404(Payment, pk=payment_id, guid=guid)
+    if payment.is_approved:
+        return HttpResponseRedirect(
+            reverse('stripe.thank_you', args=[payment.id, payment.guid]))
+
+    payment_intent_id = request.GET.get('payment_intent')
+    if not payment_intent_id:
+        messages.add_message(
+            request, messages.ERROR,
+            _('Missing payment confirmation. Please try again.'))
+        return HttpResponseRedirect(
+            reverse('stripe.payonline', args=[payment.id, payment.guid]))
+
+    configure_stripe(stripe)
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+    except Exception as e:
+        messages.add_message(request, messages.ERROR, str(e))
+        return HttpResponseRedirect(
+            reverse('stripe.payonline', args=[payment.id, payment.guid]))
+
+    metadata = getattr(payment_intent, 'metadata', None)
+    meta_id = getattr(metadata, 'tendenci_payment_id', None) if metadata is not None else None
+    meta_guid = getattr(metadata, 'tendenci_payment_guid', None) if metadata is not None else None
+    if str(meta_id) != str(payment.id) or str(meta_guid) != str(payment.guid):
+        messages.add_message(
+            request, messages.ERROR,
+            _('Payment confirmation did not match this invoice.'))
+        return HttpResponseRedirect(
+            reverse('stripe.payonline', args=[payment.id, payment.guid]))
+
+    if getattr(payment_intent, 'status', None) != 'succeeded':
+        messages.add_message(
+            request, messages.ERROR,
+            _('Payment was not completed (status: %s).')
+            % payment_intent.status)
+        return HttpResponseRedirect(
+            reverse('stripe.payonline', args=[payment.id, payment.guid]))
+
     with transaction.atomic():
-        payment = get_object_or_404(Payment.objects.select_for_update(), pk=payment_id, guid=guid)
-        form = StripeCardForm(request.POST or None)
-        billing_info_form = BillingInfoForm(request.POST or None, instance=payment)
-        currency = get_setting('site', 'global', 'currency')
-        if not currency:
-            currency = 'usd'
-        if request.method == "POST" and form.is_valid():
-            # get stripe token and make a payment immediately
-            configure_stripe(stripe)
-            token = request.POST.get('stripe_token')
+        payment = get_object_or_404(
+            Payment.objects.select_for_update(), pk=payment_id, guid=guid)
+        if not payment.is_approved:
+            _finalize_successful_payment(request, payment, payment_intent)
 
-            if billing_info_form.is_valid():
-                payment = billing_info_form.save()
-
-            # determine if we need to create a stripe customer (for membership auto renew)
-            customer = False
-            obj_user = None
-            membership = None
-            obj = payment.invoice.get_object()
-            if obj and hasattr(obj, 'memberships'):
-                if obj.memberships and len(obj.memberships()):
-                    membership = obj.memberships()[0]
-                    if membership.auto_renew and not membership.has_rp(platform='stripe'):
-                        obj_user = membership.user
-                    else:
-                        membership = None
-
-            if obj_user:
-                try:
-                    # Create a Customer:
-                    customer = stripe.Customer.create(
-                                email=obj_user.email,
-                                description="For membership auto renew",
-                                source=token,
-                    )
-                except:
-                    customer = None
-
-            # create the charge on Stripe's servers - this will charge the user's card
-            params = {
-                       'amount': math.trunc(payment.amount * 100), # amount in cents, again
-                       'currency': currency,
-                       'description': payment.description,
-                      }
-
-            # Check if this transaction should be made to a connected account
-            connected_account_id, scope = payment.invoice.stripe_connected_account()
-            if connected_account_id:
-                stripe.client_id = get_setting('module', 'payments', 'stripe_connect_client_id')
-                if scope == 'express':
-                    # is there application fee (application_fee_amount)?
-                    application_fee = payment.invoice.get_stripe_application_fee(payment.amount)
-                    params.update({
-                                    'application_fee_amount': math.trunc(application_fee * 100),
-                                    "transfer_data": {"destination": connected_account_id
-                                }},)
-                else:
-                    params.update({'stripe_account': connected_account_id})
-
-            if customer:
-                params.update({'customer': customer.id})
-            else:
-                params.update({'source': token})
-
-            try:
-                charge_response = stripe.Charge.create(**params)
-                # an example of response: https://api.stripe.com/v1/charges/ch_YjKFjLIItzRDv7
-                #charge_response = simplejson.loads(charge)
-            except (stripe.error.CardError, stripe.error.InvalidRequestError) as e:
-                # it's a decline
-                json_body = e.json_body
-                err  = json_body and json_body['error']
-                code = err and err['code']
-                message = err and err['message']
-                charge_response = '{message} status={status}, code={code}'.format(
-                            message=message, status=e.http_status, code=code)
-                
-            except Exception as e:
-                if hasattr(e, 'message'):
-                    charge_response = e.message
-                else:
-                    charge_response = str(e)
-
-            # add a rp entry now
-            if hasattr(charge_response,'paid') and charge_response.paid:
-                if customer and membership:
-                    kwargs = {'platform': 'stripe',
-                              'customer_profile_id': customer.id,
-                              }
-                    membership.get_or_create_rp(request.user, **kwargs)
-
-            # update payment status and object
-            if not payment.is_approved:  # if not already processed
-                payment_update_stripe(request, charge_response, payment)
-                payment_processing_object_updates(request, payment)
-
-                # log an event
-                log_payment(request, payment)
-
-                # send payment recipients notification
-                send_payment_notice(request, payment)
-
-            # redirect to thankyou
-            return HttpResponseRedirect(reverse('stripe.thank_you', args=[payment.id, payment.guid]))
-
-    return render_to_resp(request=request, template_name=template_name,
-                              context={'form': form,
-                                              'billing_info_form': billing_info_form,
-                                              'STRIPE_PUBLISHABLE_KEY': settings.STRIPE_PUBLISHABLE_KEY,
-                                              'payment': payment})
+    return HttpResponseRedirect(
+        reverse('stripe.thank_you', args=[payment.id, payment.guid]))
 
 
 @login_required
