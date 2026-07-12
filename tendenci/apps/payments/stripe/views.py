@@ -37,7 +37,7 @@ from tendenci.apps.perms.utils import has_perm
 from tendenci.apps.base.utils import get_next_url
 
 from .models import StripeAccount
-from .utils import stripe_set_app_info
+from .utils import configure_stripe
 
 STRIPE_TOKEN_URL = 'https://connect.stripe.com/oauth/token'
 STRIPE_DEAUTHORIZE_URL = 'https://connect.stripe.com/oauth/deauthorize'
@@ -58,7 +58,7 @@ def acct_onboarding(request, template_name='payments/stripe/connect/acct_onboard
             account_name = onboarding_form.cleaned_data['account_name']
             scope = onboarding_form.cleaned_data['scope']
             # create a stripe account on stripe
-            stripe.api_key = settings.STRIPE_SECRET_KEY
+            configure_stripe(stripe)
             try:
                 if scope == 'express':
                     acct = stripe.Account.create(
@@ -117,7 +117,7 @@ def acct_onboarding_refresh(request, sa_id):
     site_url = get_setting('site', 'global', 'siteurl')
     err_msg = ''
     if sa.status_detail == 'not completed':
-        stripe.api_key = settings.STRIPE_SECRET_KEY
+        configure_stripe(stripe)
         try:
             acct_link = stripe.AccountLink.create(
                           account=sa.stripe_user_id,
@@ -145,10 +145,11 @@ def acct_onboarding_done(request, sa_id, template_name='payments/stripe/connect/
     sa = get_object_or_404(StripeAccount, pk=sa_id)
     
     # retriever the stripe account
-    stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
+    configure_stripe(stripe)
     acct = stripe.Account.retrieve(sa.stripe_user_id)
     if all([acct.charges_enabled,
-            acct.capabilities.card_payments == 'active']):
+            getattr(acct.capabilities, 'card_payments', None) == 'active',
+            getattr(acct.capabilities, 'transfers', None) == 'active']):
         # completed
         sa.status_detail = 'active'
         sa.save()
@@ -216,9 +217,7 @@ class WebhooksView(View):
         payload = request.body.decode()
         sig_header = request.META['HTTP_STRIPE_SIGNATURE']
         event = None
-        stripe.api_key = settings.STRIPE_SECRET_KEY
-        #stripe.api_version = settings.STRIPE_API_VERSION
-        #stripe_set_app_info(stripe)
+        configure_stripe(stripe)
 
         # Verify webhook signature and extract the event.
         try:
@@ -247,8 +246,8 @@ class WebhooksView(View):
             if sa and sa.status_detail == 'not completed':
                 acct = stripe.Account.retrieve(account)
                 if all([acct.charges_enabled,
-                        acct.capabilities.platform_payments == 'active',
-                        acct.capabilities.card_payments == 'active']):
+                        getattr(acct.capabilities, 'transfers', None) == 'active',
+                        getattr(acct.capabilities, 'card_payments', None) == 'active']):
                     # completed
                     sa.status_detail = 'active'
                     sa.save()
@@ -303,9 +302,7 @@ class FetchAccessToken(View):
             sa.save()
             
             # retrieve account info
-            stripe.api_key = settings.STRIPE_SECRET_KEY
-            stripe.api_version = settings.STRIPE_API_VERSION
-            stripe_set_app_info(stripe)
+            configure_stripe(stripe)
             account = stripe.Account.retrieve(stripe_user_id)
             sa.account_name = getattr(account, 'display_name', '') or ''
             if not sa.account_name:
@@ -351,9 +348,7 @@ def pay_online(request, payment_id, guid='', template_name='payments/stripe/payo
             currency = 'usd'
         if request.method == "POST" and form.is_valid():
             # get stripe token and make a payment immediately
-            stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
-            stripe.api_version = settings.STRIPE_API_VERSION
-            stripe_set_app_info(stripe)
+            configure_stripe(stripe)
             token = request.POST.get('stripe_token')
 
             if billing_info_form.is_valid():
@@ -407,7 +402,7 @@ def pay_online(request, payment_id, guid='', template_name='payments/stripe/payo
             if customer:
                 params.update({'customer': customer.id})
             else:
-                params.update({'card': token})
+                params.update({'source': token})
 
             try:
                 charge_response = stripe.Charge.create(**params)
@@ -464,9 +459,7 @@ def update_card(request, rp_id):
         and not (rp.user and rp.user.id == request.user.id):
         raise Http403
 
-    stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
-    stripe.api_version = settings.STRIPE_API_VERSION
-    stripe_set_app_info(stripe)
+    configure_stripe(stripe)
     token = request.POST.get('stripeToken')
     try:
         if not rp.customer_profile_id:

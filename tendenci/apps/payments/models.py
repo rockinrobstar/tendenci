@@ -2,13 +2,12 @@ import uuid
 
 import stripe
 
-from django.conf import settings
 from django.db import models
 from django.urls import reverse
 from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 from tendenci.apps.invoices.models import Invoice
-from tendenci.apps.payments.stripe.utils import stripe_set_app_info
+from tendenci.apps.payments.stripe.utils import configure_stripe
 from tendenci.apps.site_settings.utils import get_setting
 
 
@@ -297,9 +296,7 @@ class PaymentMethod(models.Model):
 class RefundQuerySet(models.QuerySet):
     def connect_to_stripe(self):
         """Make sure Stripe has the API Key"""
-        stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
-        stripe.api_version = settings.STRIPE_API_VERSION
-        stripe_set_app_info(stripe)
+        configure_stripe(stripe)
 
     def create(self, *args, **kwargs):
         """Refund through Stripe and save record of transaction"""

@@ -1,4 +1,7 @@
+from django.conf import settings
+
 from tendenci import __version__ as tendenci_version
+
 
 def stripe_set_app_info(stripe):
     stripe.set_app_info(
@@ -7,6 +10,13 @@ def stripe_set_app_info(stripe):
     url="https://www.tendenci.com",
     partner_id="pp_partner_FcOFsMQDoGeT1B"
 )
+
+
+def configure_stripe(stripe_module):
+    """Set API key, API version, and partner app info for Stripe requests."""
+    stripe_module.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
+    stripe_module.api_version = settings.STRIPE_API_VERSION
+    stripe_set_app_info(stripe_module)
 
 
 def payment_update_stripe(request, charge_response, payment):

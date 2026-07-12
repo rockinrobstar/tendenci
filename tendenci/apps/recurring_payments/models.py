@@ -23,7 +23,7 @@ from tendenci.apps.recurring_payments.managers import RecurringPaymentManager
 #from tendenci.apps.recurring_payments.authnet.utils import direct_response_dict
 from tendenci.apps.payments.models import Payment
 from tendenci.apps.site_settings.utils import get_setting
-from tendenci.apps.payments.stripe.utils import stripe_set_app_info
+from tendenci.apps.payments.stripe.utils import configure_stripe
 from tendenci.apps.payments.authorizenet.utils import AuthNetAPI
 
 
@@ -162,26 +162,54 @@ class RecurringPayment(models.Model):
     def get_source_data(self):
         # https://www.pcisecuritystandards.org/pdfs/pci_fs_data_storage.pdf
         if self.platform == 'stripe':
-            stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
-            stripe.api_version = settings.STRIPE_API_VERSION
-            stripe_set_app_info(stripe)
+            configure_stripe(stripe)
             card = None
             if self.customer_profile_id:
                 customer = stripe.Customer.retrieve(self.customer_profile_id)
-                default_card_id = getattr(customer, 'default_card', None)
-                if default_card_id:
-                    card = customer.sources.retrieve(default_card_id)
-                else:
-                    default_source = getattr(customer, 'default_source', None)
-                    if default_source:
-                        sources = getattr(customer, 'sources', None)
-                        if sources:
-                            data = getattr(sources, 'data', None)
-                            if data:
-                                for c in data:
-                                    if c['id'] == default_source:
-                                        card = c
-                                        break
+                default_source = getattr(customer, 'default_source', None)
+                if default_source:
+                    sources = getattr(customer, 'sources', None)
+                    if sources:
+                        try:
+                            card = sources.retrieve(default_source)
+                        except Exception:
+                            data = getattr(sources, 'data', None) or []
+                            for c in data:
+                                if c['id'] == default_source:
+                                    card = c
+                                    break
+                if not card:
+                    # Legacy field kept as a fallback for very old customers
+                    default_card_id = getattr(customer, 'default_card', None)
+                    if default_card_id and getattr(customer, 'sources', None):
+                        try:
+                            card = customer.sources.retrieve(default_card_id)
+                        except Exception:
+                            card = None
+                if not card:
+                    # Modern PaymentMethods attached to the customer
+                    payment_methods = stripe.PaymentMethod.list(
+                        customer=self.customer_profile_id,
+                        type='card',
+                    )
+                    data = getattr(payment_methods, 'data', None) or []
+                    if data:
+                        default_pm = None
+                        invoice_settings = getattr(customer, 'invoice_settings', None)
+                        default_pm_id = getattr(invoice_settings, 'default_payment_method', None) if invoice_settings else None
+                        if default_pm_id:
+                            for pm in data:
+                                if pm.id == default_pm_id:
+                                    default_pm = pm
+                                    break
+                        pm = default_pm or data[0]
+                        pm_card = getattr(pm, 'card', None)
+                        if pm_card:
+                            return {
+                                'last4': pm_card.last4,
+                                'exp_year': pm_card.exp_year,
+                                'exp_month': pm_card.exp_month,
+                            }
                 if card:
                     return {'last4': card['last4'], 'exp_year': card['exp_year'], 'exp_month': card['exp_month']}
         return None
@@ -620,9 +648,7 @@ class RecurringPaymentInvoice(models.Model):
 
         # charge user
         if  self.recurring_payment.platform == "stripe":
-            stripe.api_key = getattr(settings, 'STRIPE_SECRET_KEY', '')
-            stripe.api_version = settings.STRIPE_API_VERSION
-            stripe_set_app_info(stripe)
+            configure_stripe(stripe)
             params = {
                        'amount': math.trunc(amount * 100), # amount in cents, again
                        'currency': get_setting('site', 'global', 'currency'),
