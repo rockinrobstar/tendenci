@@ -437,9 +437,10 @@ def pay_online(request, payment_id, guid='', template_name='payments/stripe/payo
         err_msg = str(e)
         messages.add_message(request, messages.ERROR, _(err_msg))
 
-    site_url = get_setting('site', 'global', 'siteurl')
-    finalize_url = site_url + reverse(
-        'stripe.finalize', args=[payment.id, payment.guid])
+    # Use the request host (not siteurl) so return_url works when browsing
+    # via LAN/tunnel hosts that differ from the Site URL setting.
+    finalize_url = request.build_absolute_uri(reverse(
+        'stripe.finalize', args=[payment.id, payment.guid]))
     save_billing_url = reverse(
         'stripe.save_billing', args=[payment.id, payment.guid])
 
