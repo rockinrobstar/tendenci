@@ -19,7 +19,7 @@ register = Library()
         "corporate_memberships/applications/render_corpmembership_field.html")
 def render_corpmembership_field(request, field_obj,
                                 corpprofile_form,
-                            corpmembership_form):
+                            corpmembership_form=None):
     if field_obj.field_type == "section_break":
         field = None
     else:
@@ -27,7 +27,7 @@ def render_corpmembership_field(request, field_obj,
         if field_name in corpprofile_form.field_names \
                 and not field_obj.display_only:
             field = corpprofile_form[field_name]
-        elif field_name in corpmembership_form.field_names \
+        elif corpmembership_form and field_name in corpmembership_form.field_names \
                 and not field_obj.display_only:
             field = corpmembership_form[field_name]
         else:
@@ -152,7 +152,7 @@ class AllowEditCorpNode(Node):
 
         if corp_memb and user:
             boo = corp_memb.allow_edit_by(user)
-    
+
             if self.var_name:
                 context[self.var_name] = boo
                 return ""
@@ -255,13 +255,13 @@ class ListCorpMembershipNode(Node):
                 order = order.resolve(context)
             except:
                 order = self.kwargs['order']
-                
+
         if 'renewed_only' in self.kwargs:
             renewed_only = bool(self.kwargs['renewed_only'])
 
         if 'exclude_expired' in self.kwargs:
             exclude_expired = bool(self.kwargs['exclude_expired'])
-            
+
 
         items = CorpMembership.objects.exclude(status_detail__in=['archive', 'inactive'])
         if not allow_anonymous_search:
@@ -278,10 +278,10 @@ class ListCorpMembershipNode(Node):
         items = self.custom_model_filter(items, user)
 
         objects = []
-        
+
         if renewed_only:
             items = items.filter(renewal=True)
-            
+
         if exclude_expired:
             items = items.exclude(status_detail='expired')
 

@@ -1,9 +1,9 @@
-from datetime import datetime
 from datetime import timedelta
 from os.path import splitext
 
 from django import forms
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 
 # from captcha.fields import CaptchaField
 from tendenci.apps.resumes.models import Resume
@@ -54,7 +54,7 @@ class ResumeSearchForm(forms.Form):
         self.fields['first_name'].widget.attrs.update({'placeholder': _('Enter first name')})
         self.fields['last_name'].widget.attrs.update({'placeholder': _('Enter last name')})
         self.fields['email'].widget.attrs.update({'placeholder': _('Enter email')})
-        
+
         if Industry.objects.filter(status=True, status_detail='active').exists():
             industry_choices = [(0, _('SELECT ONE'))] + list(Industry.objects.filter(
                             status=True, status_detail="active").order_by('position', '-update_dt'
@@ -63,7 +63,7 @@ class ResumeSearchForm(forms.Form):
                                     choices=industry_choices)
         else:
             del self.fields['industry']
-        
+
         for field in self.fields:
             if field not in ['search_criteria', 'search_text', 'search_method', 'grid_view']:
                 self.fields[field].widget.attrs.update({'class': 'form-control'})
@@ -110,10 +110,10 @@ class ResumeForm(TendenciBaseForm):
     contact_website = forms.CharField(label=_("Website"), required=False)
 
     activation_dt = forms.SplitDateTimeField(label=_('Activation Date/Time'),
-        initial=datetime.now())
+        initial=timezone.now())
 
     expiration_dt = forms.SplitDateTimeField(label=_('Expriation Date/Time'),
-        initial=(datetime.now() + timedelta(days=30)))
+        initial=(timezone.now() + timedelta(days=30)))
 
     syndicate = forms.BooleanField(label=_('Include in RSS Feed'), required=False, initial=True)
 
@@ -270,7 +270,7 @@ class ResumeForm(TendenciBaseForm):
             self.fields['contact_fax'].initial = self.user.profile.fax
             self.fields['contact_email'].initial = self.user.email
             self.fields['contact_website'].initial = self.user.profile.url
-            
+
         for f in list(set(fields_to_pop)):
             if f in self.fields: self.fields.pop(f)
 
@@ -308,11 +308,11 @@ class ResumeForm(TendenciBaseForm):
 class ResumeExportForm(FormControlWidgetMixin, forms.Form):
     start_dt = forms.DateField(
                 label=_('From'),
-                initial=datetime.now()-timedelta(days=365))
+                initial=timezone.now()-timedelta(days=365))
 
     end_dt = forms.DateField(
                 label=_('To'),
-                initial=datetime.now())
+                initial=timezone.now())
     include_files = forms.BooleanField(initial=False, required=False)
 
     def clean_start_dt(self):

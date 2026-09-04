@@ -35,6 +35,7 @@ from django.core.validators import validate_email as _validate_email
 from django.contrib.humanize.templatetags.humanize import intcomma
 from django.template.loader import get_template
 from django.template import TemplateDoesNotExist
+from django.utils.formats import date_format as dj_format_date
 from django.contrib.admin.utils import NestedObjects
 from django.utils.functional import keep_lazy_text
 from django.utils.text import capfirst, Truncator
@@ -83,7 +84,7 @@ def is_ajax(request):
 
 def get_us_state_name(state_abbr):
     """
-    Given a state abbreiation, 
+    Given a state abbreiation,
     returns a state name
     """
     return dict(US_STATES).get(state_abbr, state_abbr)
@@ -114,10 +115,10 @@ def escape_csv(payload):
     """
     Escape the begining character in ('@','+','-', '=', '|')
     to prevent CSV Injection.
-    
+
     This function is based on the gist https://gist.github.com/ZephrFish/ab951ca43d95f68e557c9c2e5ca6f2cc
     """
-    if payload and isinstance(payload, str): 
+    if payload and isinstance(payload, str):
         if payload[0] in ('@','+','-', '=', '|'):
             payload = "'" + payload
             payload = payload.replace("|", r"\|")
@@ -285,7 +286,7 @@ def tcurrency(mymoney):
     """
     if mymoney is None:
         return 'n/a'
-    
+
     currency_symbol = get_setting("site", "global", "currencysymbol")
     allow_commas = get_setting("site", "global", "allowdecimalcommas")
 
@@ -297,15 +298,15 @@ def tcurrency(mymoney):
             # tax usually has 4 number of digits after the decimal point,
             # make it 2
             mymoney = Decimal(f'{mymoney:.2f}')
-        
+
         if mymoney >= 0:
             fmt = '%s%s'
         else:
             fmt = '%s(%s)'
         if allow_commas:
             mymoney = intcomma(mymoney)
-            
-        # Remove redundant '-' if present 
+
+        # Remove redundant '-' if present
         return (fmt % (currency_symbol, mymoney)).replace('-', '')
     else:
         return mymoney
@@ -324,15 +325,15 @@ def currency_check(mymoney):
     return mymoney
 
 
-def format_datetime_range(start_dt, end_dt, format_date='%A, %B %d, %Y', format_time='%I:%M %p'):
+def format_datetime_range(start_dt, end_dt, format_date='DATE_FORMAT', format_time='TIME_FORMAT'):
     """
         takes datetime objects, start_dt, end_dt and format (for date and time)
         returns a formated datetime string with range.
-        ex:
+        eg:
             dt_str = format_datetime_range(datetime(2010, 8, 12, 8, 30, 0),
                                            datetime(2010, 8, 12, 17, 30, 0))
             # returns: Thursday, August 12, 2010 8:30 AM - 05:30 PM
-                                                                    - GJQ 8/12/2010
+            (With default US Date/time formatting settings)
     """
     if isinstance(start_dt, datetime) and isinstance(end_dt, datetime):
         # convert into current active timezone before formating (for
@@ -342,14 +343,14 @@ def format_datetime_range(start_dt, end_dt, format_date='%A, %B %d, %Y', format_
         if not timezone.is_naive(start_dt):
             end_dt = timezone.localtime(end_dt)
         if start_dt.date() == end_dt.date():
-            return '{} {} - {}'.format(start_dt.strftime(format_date),
-                                   start_dt.strftime(format_time),
-                                   end_dt.strftime(format_time))
+            return (f'{dj_format_date(start_dt, format_date)} '
+                    f'{dj_format_date(start_dt, format_time)} - '
+                    f'{dj_format_date(end_dt, format_time)}')
         else:
-            return '{} {} - {} {}'.format(start_dt.strftime(format_date),
-                                      start_dt.strftime(format_time),
-                                      end_dt.strftime(format_date),
-                                      end_dt.strftime(format_time))
+            return (f'{dj_format_date(start_dt, format_date)} '
+                    f'{dj_format_date(start_dt, format_time)} - '
+                    f'{dj_format_date(end_dt, format_date)} '
+                    f'{dj_format_date(end_dt, format_time)}')
 
 
 def day_validate(dt, day):
@@ -565,7 +566,7 @@ class FormDateTimes:
         self.get_date_times()
     def get_date_times(self):
         if self.start_dt is None:
-            self.start_dt = datetime.now()
+            self.start_dt = timezone.now()
 
         # remove the seconds and microseconds
         self.start_dt = self.start_dt.replace(second=00,microsecond=00)
@@ -651,10 +652,10 @@ def apply_orientation(im):
     -----------
     im : Image
         An Image instance
-    
+
     Returns
     -------
-    Image 
+    Image
         A rotated or original image instance
     """
 
@@ -671,7 +672,7 @@ def apply_orientation(im):
                     if image_orientation == 8:
                         return im.rotate(90)
     except:
-        pass 
+        pass
     return im
 
 def image_rescale(img, size, force=True):
@@ -964,7 +965,7 @@ def directory_cleanup(dir_path, ndays):
             continue
         file_path = os.path.join(dir_path, filename)
         modified_dt = default_storage.get_modified_time(file_path)
-        if modified_dt + timedelta(days=ndays) < datetime.now():
+        if modified_dt + timedelta(days=ndays) < timezone.now():
             # the file is older than ndays, delete it
             default_storage.delete(file_path)
     for foldername in foldernames:

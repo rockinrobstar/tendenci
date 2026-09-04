@@ -1,7 +1,9 @@
+from django.conf import settings
 from django.contrib import admin
 from django.urls import reverse
 from django.http import HttpResponseRedirect
 from django.contrib.admin import SimpleListFilter
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from django.urls import path, re_path
 from django.shortcuts import get_object_or_404, redirect
@@ -379,21 +381,21 @@ class CorpMembershipAdmin(TendenciBaseModelAdmin):
     def join_date(self, instance):
         if not instance.join_dt:
             return ''
-        return instance.join_dt.strftime('%m-%d-%Y')
+        return date_format(instance.join_dt, 'SHORT_DATE_FORMAT')
     join_date.short_description = _('Join Date')
     join_date.admin_order_field = 'join_dt'
 
     def renew_date(self, instance):
         if not instance.renew_dt:
             return ''
-        return instance.renew_dt.strftime('%m-%d-%Y')
+        return date_format(instance.renew_dt, 'SHORT_DATE_FORMAT')
     renew_date.short_description = _('Renew Date')
     renew_date.admin_order_field = 'renew_dt'
 
     def expire_date(self, instance):
         if not instance.expiration_dt:
             return ''
-        return instance.expiration_dt.strftime('%m-%d-%Y')
+        return date_format(instance.expiration_dt, 'SHORT_DATE_FORMAT')
     expire_date.short_description = _('Expiration Date')
     expire_date.admin_order_field = 'expiration_dt'
 
@@ -738,7 +740,7 @@ class CorpProfileAdmin(TendenciBaseModelAdmin):
     form = CorpProfileAdminForm
 
     def get_list_display(self, request):
-        list_display = ['name',]
+        list_display = ['id', 'name',]
         if get_setting('module', 'trainings', 'enabled'):
             list_display.append('show_transcripts')
         return list_display
@@ -814,13 +816,13 @@ class CorpMembershipRepAdmin(admin.ModelAdmin):
     def iter_reps(self, corp_reps):
         import csv
         from tendenci.apps.base.utils import Echo
-        field_names = ['ID', 'Corp Profile', 'Rep Name', 'Rep Email', 
+        field_names = ['ID', 'Corp Profile', 'Rep Name', 'Rep Email',
                        'Is dues rep?', 'Is member rep?',
                        'Expiration Date', 'Status detail']
         writer = csv.DictWriter(Echo(), fieldnames=field_names)
         # write headers
         yield writer.writerow(dict(zip(field_names, field_names)))
-    
+
         for corp_rep in corp_reps:
             rep_name = corp_rep.user.get_full_name()
             if not rep_name:
@@ -842,13 +844,13 @@ class CorpMembershipRepAdmin(admin.ModelAdmin):
         """
         import time as ttime
         from django.http import StreamingHttpResponse
-    
+
         response = StreamingHttpResponse(
             streaming_content=(self.iter_reps(queryset)),
             content_type='text/csv',)
         response['Content-Disposition'] = f'attachment;filename=corp_reps_export_{ttime.time()}.csv'
         return response
-    
+
     export_selected.short_description = 'Export selected'
 
     def get_queryset(self, request):
@@ -888,12 +890,12 @@ class CorpMembershipRepAdmin(admin.ModelAdmin):
             return corp_membership.status_detail.capitalize()
         return ''
     status_detail.short_description = 'Status Detail'
-    
+
     def expiration_date(self, instance):
         corp_membership = instance.corp_profile.corp_membership
         if not corp_membership or not corp_membership.expiration_dt:
             return ''
-        return corp_membership.expiration_dt.strftime('%Y-%m-%d')
+        return date_format(corp_membership.expiration_dt, 'SHORT_DATE_FORMAT')
     expiration_date.short_description = _('Expiration Date')
 
 

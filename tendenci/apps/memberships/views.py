@@ -12,10 +12,10 @@ import time as ttime
 import subprocess
 import calendar
 from collections import OrderedDict
-from dateutil.parser import parse as dparse, ParserError 
+from dateutil.parser import parse as dparse, ParserError
 from dateutil.relativedelta import relativedelta
 from urllib.parse import urlparse, quote as url_quote
- 
+
 from django.urls import reverse
 from django.contrib.auth.models import User
 from django.contrib.auth.decorators import login_required
@@ -25,12 +25,14 @@ from django.shortcuts import redirect, get_object_or_404
 from django.http import Http404, HttpResponseRedirect, HttpResponse, StreamingHttpResponse
 from django.db.models.fields import AutoField
 from django.utils.encoding import smart_str
+from django.utils import timezone
 import simplejson
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import ForeignKey, OneToOneField
 from django.template.loader import render_to_string
 from django.db.models.query_utils import Q
 from django.core.files.storage import default_storage
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.models import ContentType
 from django.conf import settings
@@ -138,16 +140,16 @@ def memberships_search(request, app_id=0, template_name="memberships/search-per-
             if field_value:
                 if isinstance(field_value, list):
                     if field_name in user_fieldnames:
-                        memberships = memberships.filter(reduce(operator.or_, 
+                        memberships = memberships.filter(reduce(operator.or_,
                             [Q(**{f'user__{field_name}__icontains': value}) for value in field_value]))
                     elif field_name in profile_fieldnames:
-                        memberships = memberships.filter(reduce(operator.or_, 
+                        memberships = memberships.filter(reduce(operator.or_,
                             [Q(**{f'user__profile__{field_name}__icontains': value}) for value in field_value]))
                     elif field_name in membership_fieldnames:
-                        memberships = memberships.filter(reduce(operator.or_, 
+                        memberships = memberships.filter(reduce(operator.or_,
                             [Q(**{f'{field_name}__icontains': value}) for value in field_value]))
                     elif field_name in demographic_fieldnames:
-                        memberships = memberships.filter(reduce(operator.or_, 
+                        memberships = memberships.filter(reduce(operator.or_,
                             [Q(**{f'user__demographics__{field_name}__icontains': value}) for value in field_value]))
                 elif isinstance(field_value, str):
                     if field_name in user_fieldnames:
@@ -160,12 +162,12 @@ def memberships_search(request, app_id=0, template_name="memberships/search-per-
                         memberships = memberships.filter(Q(**{f'user__demographics__{field_name}__icontains': field_value}))
 
         memberships = memberships.order_by('user__last_name', 'user__first_name')
-    
+
         if 'export' in request.GET:
             if not has_change_perm:
                 raise Http403
             EventLog.objects.log(description="memberships export from memberships search")
-    
+
             response = StreamingHttpResponse(
             streaming_content=(iter_memberships(memberships, app_fields)),
             content_type='text/csv',)
@@ -207,7 +209,7 @@ def memberships_search(request, app_id=0, template_name="memberships/search-per-
             retn_content = email_membership_members(email,
                                     memberships,
                                     request=request)
-    
+
             EventLog.objects.log(instance=email)
             return StreamingHttpResponse(streaming_content=retn_content)
 
@@ -325,13 +327,13 @@ def membership_add_directory(request, id):
     membership = get_object_or_404(MembershipDefault, pk=id)
     if not  membership.is_active() or membership.directory:
         raise Http404
-    
+
     if not get_setting('module',  'memberships', 'adddirectory'):
         raise Http404
-    
+
     has_approve_perm = has_perm(request.user, 'memberships.approve_membershipdefault') and \
                 has_perm(request.user, 'memberships.change_membershipdefault')
-                
+
     if request.user.profile.is_superuser or has_approve_perm:
         membership.add_directory()
 
@@ -352,7 +354,7 @@ def message_pending_members(request, email_id=None, form_class=MessageForm, temp
     # Allow only for admin
     if not request.user.profile.is_superuser:
         raise Http403
-    
+
     if email_id:
         email = get_object_or_404(Email, id=email_id)
     else:
@@ -367,7 +369,7 @@ def message_pending_members(request, email_id=None, form_class=MessageForm, temp
             theme_root = get_theme_root()
         default_subject_file_path = os.path.join(theme_root, 'templates', 'memberships/message/pending-members-subject.txt')
         default_body_file_path = os.path.join(theme_root, 'templates', 'memberships/message/pending-members-body.txt')
-        
+
         if os.path.isfile(default_subject_file_path):
             with open(default_subject_file_path) as fp:
                 default_subject = fp.read()
@@ -380,7 +382,7 @@ def message_pending_members(request, email_id=None, form_class=MessageForm, temp
         'body': default_body,
         'sender_display': request.user.get_full_name(),
         'reply_to': request.user.email})
-    
+
     if request.method == "POST":
         if form.is_valid():
             email = form.save()
@@ -417,10 +419,10 @@ def message_pending_members(request, email_id=None, form_class=MessageForm, temp
                 email.body = template.render(context)
                 email.send()
                 email.body = tmp_body
-                
+
                 msg_string = 'Successfully sent email "%s" to myself.' % (subject)
                 messages.add_message(request, messages.SUCCESS, msg_string)
-    
+
                 return HttpResponseRedirect(reverse('membership.message_pending', args=([email.id])))
             else:
                 retn_content = email_pending_members(email, recipient_type=email.recipient_type,
@@ -654,22 +656,22 @@ def membership_default_import_preview(request, mimport_id,
             for f in ['join_dt', 'expire_dt', 'membership_type']:
                 if f in idata.row_data:
                     user_display[f] = idata.row_data[f]
-            
+
             users_list.append(user_display)
             if not fieldnames:
                 fieldnames = list(idata.row_data.keys())
 
         # DateTime fields are sensitive to parse failures
-        # They are not parsed in the preview yet, in fact all 
-        # data travens as strings to be cleaned and parsd just 
-        # before being saved to the respecive models. Datetimes 
+        # They are not parsed in the preview yet, in fact all
+        # data travens as strings to be cleaned and parsd just
+        # before being saved to the respecive models. Datetimes
         # and dates are parsed with dateutil.parser, so we fo
         # that here specifically so that someone importing dates
-        # sees a preview of the parse success/failure before 
+        # sees a preview of the parse success/failure before
         # committing.
         #
-        # We elect join_dt and expire_dt as the two most likely 
-        # dates of interest to someone importing members en 
+        # We elect join_dt and expire_dt as the two most likely
+        # dates of interest to someone importing members en
         # masse.
         for dt in ['join_dt', 'expire_dt']:
             if dt in fieldnames:
@@ -682,8 +684,8 @@ def membership_default_import_preview(request, mimport_id,
                     else:
                         u[dt] = "None"
 
-        # Similarly membership_type if imported must be 
-        # imported as the id of a membership_type and it's 
+        # Similarly membership_type if imported must be
+        # imported as the id of a membership_type and it's
         # useful to get feedback on integrity at the preview
         # before committing the import.
         # TODO: This could generalize to all ID type imports supported
@@ -917,7 +919,7 @@ def membership_default_export(
             export_status_detail = form.cleaned_data['export_status_detail']
 
             identifier = int(ttime.time())
-            run_membership_export(request, 
+            run_membership_export(request,
                           identifier=identifier,
                           export_fields=export_fields,
                           export_type=export_type,
@@ -1151,7 +1153,7 @@ def membership_default_add(request, slug='', membership_id=None,
         if not (request.user.is_superuser or request.user == membership.user):
             raise Http403
         # Check if they're an individual under a corp.
-        # If so, assign cm_id and join_under_corporate 
+        # If so, assign cm_id and join_under_corporate
         # so that we can check if this individual can be
         # renewed or not.
         if membership.corporate_membership_id and not cm_id:
@@ -1190,7 +1192,7 @@ def membership_default_add(request, slug='', membership_id=None,
         membership_type_id = int(membership_type_id)
     else:
         membership_type_id = 0
-    
+
     corp_membership = None
     is_corp_rep = False
 
@@ -1261,8 +1263,8 @@ def membership_default_add(request, slug='', membership_id=None,
                 corp_expired = True
             elif not get_setting('module', 'memberships', 'orgmembercanrenew'):
                 if not (request.user.is_superuser or is_corp_rep):
-                    renewal_blocked = True 
-            
+                    renewal_blocked = True
+
             #display_msg = _("Sorry, we can't process your membership renewal at the moment.")
             if renewal_blocked or corp_expired:
                 return render_to_resp(request=request, template_name='memberships/applications/corp_not_renewed.html',
@@ -1282,7 +1284,8 @@ def membership_default_add(request, slug='', membership_id=None,
                 if corp_membership.members_count == membership_cap:
                     # email admin and corporate reps about this corp. has reached cap
                     # only sent when cap is reached so they don't get freaked out for too many emails
-                    email_sent = corp_membership.email_reps_cap_reached()
+                    if request.method == 'POST':
+                        email_sent = corp_membership.email_reps_cap_reached()
                 else:
                     email_sent = False
 
@@ -1605,7 +1608,7 @@ def membership_default_add(request, slug='', membership_id=None,
                                 membership_type=membership.membership_type,
                             )
                             memberships_renewal_notified.append(membership)
-    
+
                         else:
                             notice_sent =  Notice.send_notice(
                                 request=request,
@@ -1676,7 +1679,7 @@ def membership_default_add(request, slug='', membership_id=None,
                     recipients = get_notice_recipients(
                         'module', 'memberships',
                         'membershiprecipients')
-    
+
                     extra_context = {
                         'membership': membership,
                         'app': app,
@@ -2159,8 +2162,8 @@ def membership_join_report(request):
                 memberships = memberships.filter(status_detail=membership_status)
     else:
         form = ReportForm(initial={
-            'start_date': start_date.strftime('%m/%d/%Y'),
-            'end_date': end_date.strftime('%m/%d/%Y')})
+            'start_date': date_format(start_date, "SHORT_DATE_FORMAT"),
+            'end_date': date_format(end_date, "SHORT_DATE_FORMAT")})
 
     end_date_time = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59)
     if settings.USE_TZ:
@@ -2180,48 +2183,6 @@ def membership_join_report(request):
         'memberships': memberships,
         'form': form,
         })
-
-
-# See the comments in reports.py
-#@staff_member_required
-#def membership_join_report_pdf(request):
-#    TODAY = date.today()
-#    mem_type = request.GET.get('mem_type', u'')
-#    mem_stat = request.GET.get('mem_stat', u'')
-#    start_date = request.GET.get('start_date', u'')
-#    end_date = request.GET.get('end_date', u'')
-#
-#    mems = MembershipDefault.objects.all()
-#
-#    if mem_type:
-#        mems = mems.filter(membership_type=mem_type)
-#
-#    if mem_stat:
-#        mems = mems.filter(status_detail=mem_stat.lower())
-#
-#    if start_date:
-#        start_date = parse(start_date)  # make date object
-#    else:
-#        start_date = TODAY - timedelta(days=30)
-#
-#    if end_date:
-#        end_date = parse(end_date)  # make date object
-#    else:
-#        end_date = TODAY
-#
-#    mems = mems.filter(
-#        join_dt__gte=start_date, join_dt__lte=end_date).order_by('join_dt')
-#
-#    if not mems:
-#        raise Http404
-#
-#    report = ReportNewMems(queryset=mems)
-#    response = HttpResponse(content_type='application/pdf')
-#    report.generate_by(PDFGenerator, filename=response)
-#
-#    EventLog.objects.log()
-#
-#    return response
 
 
 @staff_member_required
@@ -2291,14 +2252,14 @@ def report_active_members(request, template_name='reports/membership_list.html')
     elif sort == '-expiration':
         mems = mems.order_by('-expire_dt')
         is_ascending_expiration = True
-    # COMMENT OUT THIS INVOICE SORTING - because it is a very resource intensive 
+    # COMMENT OUT THIS INVOICE SORTING - because it is a very resource intensive
     # operation and easily to cause timeout with large volume of memberships.
 #     elif sort == 'invoice':
 #         # since we need to sort by a related field with the proper
 #         # conditions we'll need to bring the sorting to the python level
 #         mems = sorted(mems, key=lambda mem: mem.get_invoice(), reverse=True)
 #         is_ascending_invoice = False
-# 
+#
 #     elif sort == '-invoice':
 #         # since we need to sort by a related field with the proper
 #         # conditions we'll need to bring the sorting to the python level
@@ -2322,15 +2283,15 @@ def report_active_members(request, template_name='reports/membership_list.html')
             ]
 
             writer = csv.DictWriter(Echo(), fieldnames=header_row)
-            
+
             yield writer.writerow(dict(zip(header_row, header_row)))
-                
+
             for mem in mems:
-    
+
                 invoice_pk = ''
                 if mem.get_invoice():
                     invoice_pk = '%i' % mem.get_invoice().pk
-    
+
                 mem_row = [
                     mem.user.username,
                     mem.user.get_full_name(),

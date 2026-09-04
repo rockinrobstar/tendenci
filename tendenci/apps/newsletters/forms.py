@@ -90,7 +90,7 @@ class OldGenerateForm(forms.ModelForm):
         self.fields['group'].empty_label = _('SELECT ONE')
         self.fields['event_start_dt'].initial = datetime.date.today()
         self.fields['event_end_dt'].initial = datetime.date.today() + datetime.timedelta(days=30)
-        
+
         default_groups = Group.objects.filter(status=True, status_detail="active",
                                               sync_newsletters=True)
         if not self.request.user.is_superuser:
@@ -216,8 +216,8 @@ class MarketingStepFiveForm(FormControlWidgetMixin, forms.ModelForm):
     create_article = forms.BooleanField(label=_('Create an Article from this Newsletter?'), required=False)
     schedule_send = forms.BooleanField(label=_('Schedule to Send?'), required=False)
     schedule_send_dt = forms.SplitDateTimeField(label=_('Starts On'), required=False,
-                                  input_date_formats=['%Y-%m-%d', '%m/%d/%Y'],
-                                  input_time_formats=['%I:%M %p', '%H:%M:%S'])
+                                  input_date_formats=settings.DATE_INPUT_FORMATS,
+                                  input_time_formats=settings.TIME_INPUT_FORMATS)
     class Meta:
         model = Newsletter
         fields = ('create_article',
@@ -294,8 +294,8 @@ class MarketingStepFiveForm(FormControlWidgetMixin, forms.ModelForm):
 
 class MarketingEditScheduleForm(FormControlWidgetMixin, forms.ModelForm):
     schedule_send_dt = forms.SplitDateTimeField(label=_('Starts On'),
-                                  input_date_formats=['%Y-%m-%d', '%m/%d/%Y'],
-                                  input_time_formats=['%I:%M %p', '%H:%M:%S'])
+                                  input_date_formats=settings.DATE_INPUT_FORMATS,
+                                  input_time_formats=settings.TIME_INPUT_FORMATS,)
     class Meta:
         model = Newsletter
         fields = ('schedule_send_dt',

@@ -152,7 +152,7 @@ def acct_onboarding(request, template_name='payments/stripe/connect/acct_onboard
                 err_msg += str(e)
             except Exception as e:
                 err_msg += str(e)
-            
+
             if not err_msg:
                 # save the stripe account to db
                 sa = onboarding_form.save(commit=False)
@@ -161,7 +161,7 @@ def acct_onboarding(request, template_name='payments/stripe/connect/acct_onboard
                 sa.creator = sa.owner = request.user
                 sa.creator_username = sa.owner_username = request.user.username
                 sa.save()
-                
+
                 # generate an account link
                 # TODO: need to track errors
                 site_url = get_setting('site', 'global', 'siteurl')
@@ -171,13 +171,13 @@ def acct_onboarding(request, template_name='payments/stripe/connect/acct_onboard
                           return_url=site_url+reverse('stripe_connect.acct_onboarding_done', args=[sa.id]),
                           type="account_onboarding",
                         )
-                
+
                 # redirect user to the account link URL
                 return HttpResponseRedirect(acct_link.url)
-    
+
     if err_msg:
         messages.add_message(request, messages.ERROR, err_msg)
-   
+
     return render_to_resp(request=request,
                           template_name=template_name,
                         context={'onboarding_form': onboarding_form})
@@ -188,7 +188,7 @@ def acct_onboarding_refresh(request, sa_id):
     # superuser only
     if not request.user.is_superuser:
         raise Http403
-    
+
     sa = get_object_or_404(StripeAccount, pk=sa_id)
     site_url = get_setting('site', 'global', 'siteurl')
     err_msg = ''
@@ -201,7 +201,7 @@ def acct_onboarding_refresh(request, sa_id):
                           return_url=site_url+reverse('stripe_connect.acct_onboarding_done', args=[sa.id]),
                           type="account_onboarding",
                         )
-                
+
             # redirect user to the account link URL
             return HttpResponseRedirect(acct_link.url)
         except stripe.error.InvalidRequestError as e:
@@ -217,9 +217,9 @@ def acct_onboarding_refresh(request, sa_id):
 def acct_onboarding_done(request, sa_id, template_name='payments/stripe/connect/acct_onboarding_done.html'):
     if not request.user.is_superuser:
         raise Http403
-    
+
     sa = get_object_or_404(StripeAccount, pk=sa_id)
-    
+
     # retriever the stripe account
     configure_stripe(stripe)
     acct = stripe.Account.retrieve(sa.stripe_user_id)
@@ -233,10 +233,10 @@ def acct_onboarding_done(request, sa_id, template_name='payments/stripe/connect/
         messages.add_message(request, messages.SUCCESS, _(msg_string))
 
     site_url = get_setting('site', 'global', 'siteurl')
-    refresh_url= site_url + reverse('stripe_connect.acct_onboarding_refresh', args=[sa.id])   
+    refresh_url= site_url + reverse('stripe_connect.acct_onboarding_refresh', args=[sa.id])
     return render_to_resp(request=request,
                           template_name=template_name,
-                        context={'sa': sa, 
+                        context={'sa': sa,
                                  'refresh_url': refresh_url})
 
 
@@ -250,14 +250,14 @@ class AuthorizeView(TemplateView):
 
 class DeauthorizeView(View):
     template_name = 'payments/stripe/connect/deauthorize.html'
-    
+
     @method_decorator(login_required)
     def dispatch(self, request, sa_id, *args, **kwargs):
         self.sa = get_object_or_404(StripeAccount, pk=sa_id, status_detail='active')
         if not has_perm(request.user, 'stripe.delete_stripeaccount', self.sa):
             raise Http403
         return super().dispatch(request, *args, **kwargs)
-    
+
     def get(self, request, *args, **kwargs):
         return render(request, self.template_name, {'sa': self.sa})
 
@@ -288,7 +288,7 @@ class WebhooksView(View):
     @method_decorator(require_POST)
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
-    
+
     def post(self, request, *args, **kwargs):
         payload = request.body.decode()
         sig_header = request.META['HTTP_STRIPE_SIGNATURE']
@@ -376,7 +376,7 @@ class FetchAccessToken(View):
             sa.owner_username = request.user.username
             sa.status_detail='active'
             sa.save()
-            
+
             # retrieve account info
             configure_stripe(stripe)
             account = stripe.Account.retrieve(stripe_user_id)
@@ -384,12 +384,12 @@ class FetchAccessToken(View):
             if not sa.account_name:
                 business_profile = getattr(account, 'business_profile', None)
                 if business_profile:
-                    sa.account_name = getattr(business_profile, 'name', None) or ''
+                    sa.account_name = getattr(business_profile, 'name', '') or ''
             sa.email = getattr(account, 'email', '') or ''
             sa.default_currency = getattr(account, 'default_currency', '') or ''
             sa.country = getattr(account, 'country', '') or ''
             sa.save()
-        
+
             msg_string = _('Success!')
         else:
             sa = None
@@ -576,7 +576,7 @@ def update_card(request, rp_id):
         msg_string = 'Error updating payment method: {}'.format(e)
 
     messages.add_message(request, message_status, _(msg_string))
-    
+
     next_page = get_next_url(request)
     if next_page:
         return HttpResponseRedirect(next_page)

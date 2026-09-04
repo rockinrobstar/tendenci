@@ -28,6 +28,7 @@ from django.utils.translation import gettext_lazy as _
 from django.core.files.base import ContentFile
 from django.template import Context, Template
 from django.template.loader import get_template
+from django.utils.formats import date_format
 from django.utils.html import escape
 from django.utils import timezone
 
@@ -52,6 +53,8 @@ from tendenci.apps.regions.models import Region
 from tendenci.apps.base.utils import escape_csv, Echo
 
 
+CSV_OUTPUT_DATETIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+
 def get_membership_field_values(membership, app_fields):
     """
     Get a list of membership field values corresponding to the app_fields.
@@ -66,7 +69,7 @@ def get_membership_field_values(membership, app_fields):
         ud = membership.demographics
     else:
         ud = None
-    
+
     for field in app_fields:
         field_name = field.field_name
         value = ''
@@ -85,7 +88,7 @@ def get_membership_field_values(membership, app_fields):
                     is_file = False
                 if is_file:
                     value = literal_eval(value).get('html')
-                
+
         data.append(value)
     return data
 
@@ -94,7 +97,7 @@ def iter_memberships(memberships, app_fields):
     field_labels = [field.label for field in app_fields]
     field_labels += [_('Create Date'), _('Join Date'), _('Renew Date'),
                     _('Expire Date'), _('Status Detail')]
-    
+
     writer = csv.DictWriter(Echo(), fieldnames=field_labels)
     # write headers - labels
     yield writer.writerow(dict(zip(field_labels, field_labels)))
@@ -102,19 +105,19 @@ def iter_memberships(memberships, app_fields):
     for membership in memberships:
         values_list = get_membership_field_values(membership, app_fields)
         if membership.create_dt:
-            values_list.append(membership.create_dt.strftime('%Y-%m-%d %H:%M:%S'))
+            values_list.append(membership.create_dt.strftime(CSV_OUTPUT_DATETIME_FORMAT))
         else:
             values_list.append('')
         if membership.join_dt:
-            values_list.append(membership.join_dt.strftime('%Y-%m-%d %H:%M:%S'))
+            values_list.append(membership.join_dt.strftime(CSV_OUTPUT_DATETIME_FORMAT))
         else:
             values_list.append('')
         if membership.renew_dt:
-            values_list.append(membership.renew_dt.strftime('%Y-%m-%d %H:%M:%S'))
+            values_list.append(membership.renew_dt.strftime(CSV_OUTPUT_DATETIME_FORMAT))
         else:
             values_list.append('')
         if membership.expire_dt:
-            values_list.append(membership.expire_dt.strftime('%Y-%m-%d %H:%M:%S'))
+            values_list.append(membership.expire_dt.strftime(CSV_OUTPUT_DATETIME_FORMAT))
         else:
             values_list.append('')
         values_list.append(membership.status_detail)
@@ -291,7 +294,7 @@ def run_membership_export(request,
         identifier = int(ttime.time())
     temp_file_path = 'export/memberships/{}_{}_temp.csv'.format(identifier, cp_id)
     default_storage.save(temp_file_path, ContentFile(b''))
-    
+
     # start the process
     subprocess.Popen([python_executable(), "manage.py",
                   "membership_export_process",
@@ -586,11 +589,11 @@ def process_export(
                         if item.year < 1900:
                             item = '1900-1-1 00:00:00'
                         else:
-                            item = item.strftime('%Y-%m-%d %H:%M:%S')
+                            item = item.strftime(CSV_OUTPUT_DATETIME_FORMAT)
                     elif isinstance(item, date):
-                        item = item.strftime('%Y-%m-%d')
+                        item = item.strftime(CSV_OUTPUT_DATETIME_FORMAT)
                     elif isinstance(item, time):
-                        item = item.strftime('%H:%M:%S')
+                        item = item.strftime(CSV_OUTPUT_DATETIME_FORMAT)
                     elif field_name == 'membership_type' and item in membership_ids_dict:
                         # display membership type name instead of id
                         item = membership_ids_dict[item]
@@ -1053,14 +1056,14 @@ def memb_import_parse_csv(mimport):
         csv_reader = csv.reader(csvfile)
         fieldnames = next(csv_reader)
         fieldnames = normalize_field_names(fieldnames)
-    
+
         data_list = []
-    
+
         for row in csv_reader:
             if not row:
                 continue
             data_list.append(dict(zip(fieldnames, row)))
-    
+
         return fieldnames, data_list
 
 
@@ -2095,14 +2098,14 @@ def email_pending_members(email, **kwargs):
     site_url = get_setting('site', 'global', 'siteurl')
     site_display_name = get_setting('site', 'global', 'sitedisplayname')
     tmp_body = email.body
-    
+
     request = kwargs.get('request')
     recipient_type = kwargs.get('recipient_type')
     total_sent = 0
     subject = email.subject
     membership_type = kwargs.get('membership_type', None)
     corpmembership_type = kwargs.get('corpmembership_type', None)
-    
+
     msg = '<div class="hide" id="m-streaming-content" style="margin: 2em 5em;text-align: left; line-height: 1.3em;">'
     msg += '<h1>Processing ...</h1>'
     if recipient_type == 'pending_members':
@@ -2114,9 +2117,9 @@ def email_pending_members(email, **kwargs):
         for member in pending_members:
             first_name = member.user.first_name
             last_name = member.user.last_name
-    
+
             email.recipient = member.user.email
-    
+
             if email.recipient:
                 view_url = '{}{}'.format(site_url, reverse('membership.details', args=[member.id]))
                 edit_url = '{}{}'.format(site_url, reverse('membership_default.edit', args=[member.id]))
@@ -2128,7 +2131,7 @@ def email_pending_members(email, **kwargs):
                                    'view_url': view_url,
                                    'edit_url': edit_url,})
                 email.body = template.render(context)
-    
+
                 email.send()
                 total_sent += 1
                 msg += f'{total_sent}. Email sent to {escape(first_name)} {escape(last_name)} {escape(email.recipient)}<br />'
@@ -2136,7 +2139,7 @@ def email_pending_members(email, **kwargs):
                 if total_sent % 10 == 0:
                     yield msg
                     msg = ''
-    
+
             email.body = tmp_body  # restore to the original
     else:
         # to pending corp members
@@ -2144,7 +2147,7 @@ def email_pending_members(email, **kwargs):
                                         status_detail__contains='ending')
         if corpmembership_type:
             pending_members = pending_members.filter(corporate_membership_type=corpmembership_type)
-        
+
         for corp_member in pending_members:
             reps = corp_member.corp_profile.reps.all()
             for rep in reps:
@@ -2202,7 +2205,7 @@ def email_pending_members(email, **kwargs):
     msg += f'DONE!<br /><br />Successfully sent email "{subject}" to <strong>{total_sent}</strong> pending members.'
     msg += '</div>'
     yield msg
-    
+
     template_name='memberships/message/pending-members-conf.html'
     template = get_template(template_name)
     context={'total_sent': total_sent,
@@ -2222,7 +2225,7 @@ def email_membership_members(email, memberships, **kwargs):
     site_url = get_setting('site', 'global', 'siteurl')
     site_display_name = get_setting('site', 'global', 'sitedisplayname')
     tmp_body = email.body
-    
+
     # if possible, use the email backend set up for newsletters
     if is_newsletter_relay_set():
         connection = get_newsletter_connection()
@@ -2232,7 +2235,7 @@ def email_membership_members(email, memberships, **kwargs):
     request = kwargs.get('request')
     total_sent = 0
     subject = email.subject
-    
+
     msg = '<div class="hide" id="m-streaming-content" style="margin: 2em 5em;text-align: left; line-height: 1.3em;">'
     msg += '<h1>Processing ...</h1>'
 
@@ -2246,7 +2249,7 @@ def email_membership_members(email, memberships, **kwargs):
             view_url = '{}{}'.format(site_url, reverse('membership.details', args=[member.id]))
             edit_url = '{}{}'.format(site_url, reverse('membership_default.edit', args=[member.id]))
             if member.expire_dt:
-                expire_dt = ttime.strftime("%b %d, %Y", member.expire_dt.timetuple())
+                expire_dt = date_format(member.expire_dt, "SHORT_DATE_FORMAT")
             else:
                 expire_dt = ''
             renew_link = '{}{}'.format(site_url, member.get_absolute_url())
@@ -2260,7 +2263,7 @@ def email_membership_members(email, memberships, **kwargs):
                                'expire_dt': expire_dt,
                                'renew_link': renew_link})
             email.body = template.render(context)
-            
+
             # replace relative to absolute urls
             email.body = email.body.replace("src=\"/", f"src=\"{site_url}/")
             email.body = email.body.replace("href=\"/", f"href=\"{site_url}/")
@@ -2298,7 +2301,7 @@ def email_membership_members(email, memberships, **kwargs):
     msg += f'DONE!<br /><br />Successfully sent email "{subject}" to <strong>{total_sent}</strong> pending members.'
     msg += '</div>'
     yield msg
-    
+
     template_name='memberships/message/email-members-conf.html'
     template = get_template(template_name)
     context={'total_sent': total_sent,

@@ -1,11 +1,13 @@
 import os
 from datetime import timedelta, datetime
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect
 from django.http import HttpResponseRedirect, HttpResponse
 from django.urls import reverse
 from django.contrib import messages
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 
@@ -74,7 +76,7 @@ def search(request, template_name="resumes/search.html"):
     """
     filters = get_query_filters(request.user, 'resumes.view_resume')
     resumes = Resume.objects.filter(filters).distinct()
-        
+
     form = ResumeSearchForm(request.GET, user=request.user)
     if form.is_valid():
         first_name = form.cleaned_data['first_name']
@@ -96,12 +98,12 @@ def search(request, template_name="resumes/search.html"):
         search_method = None
         grid_view = False
         industry = None
-    
+
     if grid_view:
         num_items = 50
-    else: 
+    else:
         num_items = 10
-                
+
     if first_name:
         resumes = resumes.filter(first_name__istartswith=first_name)
     if last_name:
@@ -133,7 +135,7 @@ def search(request, template_name="resumes/search.html"):
         'request': request,
         'source': 'resumes'
     })
-    
+
 
     return render_to_resp(request=request, template_name=template_name,
         context={'resumes':resumes, 'form': form,
@@ -165,7 +167,7 @@ def print_view(request, slug, template_name="resumes/print-view.html"):
 @login_required
 def add(request, form_class=ResumeForm, template_name="resumes/add.html"):
     can_add_active = has_perm(request.user, 'resumes.add_resume')
-    
+
     if not any([request.user.profile.is_superuser,
                can_add_active,
                get_setting('module', 'resumes', 'usercanadd'),
@@ -364,8 +366,8 @@ def export(request, template_name="resumes/export.html"):
         end_dt = form.cleaned_data['end_dt']
         include_files = form.cleaned_data['include_files']
         if start_dt and end_dt:
-            start_dt = start_dt.strftime('%m/%d/%Y')
-            end_dt = end_dt.strftime('%m/%d/%Y')
+            start_dt = date_format(start_dt, 'SHORT_DATE_FORMAT')
+            end_dt = date_format(end_dt, 'SHORT_DATE_FORMAT')
             kwargs = {'start_dt': start_dt, 'end_dt': end_dt}
         else:
             kwargs = {}
@@ -417,7 +419,7 @@ def export(request, template_name="resumes/export.html"):
             'meta',
             'tags',
         ]
-        
+
         export_id = run_export_task('resumes', 'resume', fields, **kwargs)
         return redirect('export.status', export_id)
 

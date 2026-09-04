@@ -126,6 +126,7 @@ TEMPLATES = [
         'tendenci.apps.base.context_processors.site_admin_email',
         'tendenci.apps.base.context_processors.user_classification',
         'tendenci.apps.base.context_processors.display_name',
+        'tendenci.apps.base.context_processors.date_formatters',
         'tendenci.apps.registry.context_processors.registered_apps',
         'tendenci.apps.registry.context_processors.enabled_addons',
         'tendenci.apps.forums.context_processors.processor',
@@ -156,7 +157,7 @@ TEMPLATES = [
 def disable_template_cache():  # For use in site-specific settings.py
     if TEMPLATES[0]['OPTIONS']['loaders'][0][0] == 'tendenci.apps.theme.template_loaders.CachedLoader':
         TEMPLATES[0]['OPTIONS']['loaders'] = TEMPLATES[0]['OPTIONS']['loaders'][0][1]
-        
+
 # The form renderer does not use the TEMPLATES setting by default.  Configure it to use the
 # TEMPLATES setting so that form widget templates can be overridden in themes.
 # This requires either adding 'django.forms' to INSTALLED_APPS or adding
@@ -491,6 +492,31 @@ if not sys.warnoptions:
 
 
 # ---------------------------------------------------------------------------- #
+# Localisation Settings
+# ---------------------------------------------------------------------------- #
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'US/Central'
+DATE_FORMAT = "M d Y" # Oct 25 2006
+DATETIME_FORMAT = "M d Y, h:i A" # Oct 25, 2006 02:40pm
+SHORT_DATE_FORMAT = "m/d/Y" # 10/25/2006
+SHORT_DATETIME_FORMAT = "m/d/Y h:i A" # 10/25/2006 02:40pm
+FIRST_DAY_OF_WEEK = 1 # Monday
+MONTH_DAY_FORMAT = "M d" # Oct 25
+TIME_FORMAT = "h:i A" # 02:40pm
+YEAR_MONTH_FORMAT = "M Y" # October 2006
+
+# Used by the Bootstrap (Javascript) datepicker in templates
+# See http://www.eyecon.ro/bootstrap-datepicker for formatting
+DATEPICKER_DATE_FORMAT = 'yy-mm-dd'
+DATEPICKER_TIME_FORMAT = 'h:i A'
+
+TIME_INPUT_FORMATS = [
+    '%I:%M %p', # '01:17 PM'
+    '%H:%M:%S' # '13:17:04'
+]
+
+
+# ---------------------------------------------------------------------------- #
 # Languages
 # ---------------------------------------------------------------------------- #
 
@@ -591,7 +617,7 @@ NEWSLETTER_SCHEDULE_ENABLED = False
 
 # If True, it allows members to send emails to corporate membership reps
 # (default to False).
-# Why here not in site settings? Because we don't want this feature to be 
+# Why here not in site settings? Because we don't want this feature to be
 # turned on lightly. Extra caution is needed.
 BROADCAST_EMAIL_ENABLED = False
 
@@ -603,7 +629,7 @@ PYBB_MARKUP = 'markdown'
 PYBB_NICE_URL = True
 
 # If forum digest is enabled, make sure to set up 2 cron jobs
-# to run management command send_forum_digest daily and weekly. 
+# to run management command send_forum_digest daily and weekly.
 ENABLE_FORUM_DIGEST = False
 
 # HelpDesk App
@@ -671,7 +697,7 @@ TINYMCE_DEFAULT_CONFIG = {
     'tinymce_version': '6.8.2',
     'theme': "silver",
     'plugins': ["image", 'advlist', 'autolink', 'lists', 'link', 'charmap',
-                'preview', 'anchor', 'searchreplace', 'visualblocks', 'code',  
+                'preview', 'anchor', 'searchreplace', 'visualblocks', 'code',
                  'emoticons', 'quickbars', 'importcss',
                 'insertdatetime', 'media', 'table', 'fullscreen',],
     'toolbar': 'code undo redo | bold italic underline | forecolor backcolor emoticons | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image | fullscreen',
@@ -759,7 +785,7 @@ STRIPE_API_VERSION = '2026-06-24.dahlia'
 
 # List of merchant accounts you can set up.
 # If you want to set up multiple payment methods (gateways) for memberships,
-# the machine name of the payment methods specified should be in this list. 
+# the machine name of the payment methods specified should be in this list.
 MERCHANT_ACCOUNT_NAMES = ('stripe', 'authorizenet', 'firstdatae4', 'paypal')
 
 
@@ -849,4 +875,3 @@ Q_CLUSTER = {
     "timeout": 35000,
     "max_attempts": 1
 }
-

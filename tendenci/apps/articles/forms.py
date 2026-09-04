@@ -1,8 +1,7 @@
-from datetime import datetime, date
-
 from django import forms
 from django.conf import settings
 from django.forms.utils import ErrorList
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.models import ContentType
@@ -75,13 +74,13 @@ class ArticleSearchForm(FormControlWidgetMixin, forms.Form):
     category = CategoryField(label=_('All Categories'), choices=[], required=False)
     sub_category = CategoryField(label=_('All Subcategories'), choices=[], required=False)
     filter_date = forms.BooleanField(required=False)
-    date = forms.DateField(initial=date.today(), required=False)
+    date = forms.DateField(initial=timezone.now().date(), required=False)
     group = forms.ChoiceField(label=_('Group'), required=False, choices=[])
 
     def __init__(self, *args, **kwargs):
         is_superuser = kwargs.pop('is_superuser', None)
         super().__init__(*args, **kwargs)
-        
+
         # group
         group_choices = get_search_group_choices()
         self.fields['group'].choices = [('','All Groups')] + list(group_choices)
@@ -130,8 +129,8 @@ class ArticleForm(TendenciBaseForm):
         'storme_model': Article._meta.model_name.lower()}))
 
     release_dt = forms.SplitDateTimeField(label=_('Release Date/Time'),
-                          input_date_formats=['%Y-%m-%d', '%m/%d/%Y'],
-                          input_time_formats=['%I:%M %p', '%H:%M:%S'])
+                          input_date_formats=settings.DATE_INPUT_FORMATS,
+                          input_time_formats=settings.TIME_INPUT_FORMATS)
 
     contributor_type = forms.ChoiceField(choices=CONTRIBUTOR_CHOICES,
                                          initial=Article.CONTRIBUTOR_AUTHOR,
@@ -140,7 +139,7 @@ class ArticleForm(TendenciBaseForm):
             label=_('Thumbnail'),
             validators=[FileValidator(allowed_extensions=('.jpg', '.jpeg', '.gif', '.png'))],
             required=False,
-            help_text=_('Only jpg, gif, or png images.'))        
+            help_text=_('Only jpg, gif, or png images.'))
     syndicate = forms.BooleanField(label=_('Include in RSS feed'), required=False, initial=True)
     status_detail = forms.ChoiceField(
         choices=(('active', _('Active')), ('inactive', _('Inactive')), ('pending', _('Pending')),))
@@ -225,7 +224,7 @@ class ArticleForm(TendenciBaseForm):
             self.fields['body'].widget.mce_attrs['app_instance_id'] = 0
             self.fields['group'].initial = Group.objects.get_initial_group_id()
         default_groups = Group.objects.filter(status=True, status_detail="active")
-        
+
         if self.instance.thumbnail:
             self.initial['thumbnail_file'] = self.instance.thumbnail.file
 
@@ -247,7 +246,7 @@ class ArticleForm(TendenciBaseForm):
         self.fields['group'].choices = groups_list
         self.fields['timezone'].initial = settings.TIME_ZONE
 
-        self.fields['release_dt'].initial = datetime.now()
+        self.fields['release_dt'].initial = timezone.now()
 
     def save(self, *args, **kwargs):
         article = super().save(*args, **kwargs)

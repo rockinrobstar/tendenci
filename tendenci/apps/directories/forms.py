@@ -8,6 +8,7 @@ from django.forms.utils import ErrorList
 from django.template.defaultfilters import filesizeformat
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
+from django.utils import timezone
 from django.urls import reverse
 
 from tendenci.libs.tinymce.widgets import TinyMCE
@@ -166,8 +167,8 @@ class DirectoryForm(TendenciBaseForm):
                                                               ('premium', _('Premium')),))
     payment_method = forms.CharField(error_messages={'required': _('Please select a payment method.')})
 
-    activation_dt = forms.SplitDateTimeField(initial=datetime.now())
-    expiration_dt = forms.SplitDateTimeField(initial=datetime.now())
+    activation_dt = forms.SplitDateTimeField(initial=timezone.now())
+    expiration_dt = forms.SplitDateTimeField(initial=timezone.now())
 
     email = EmailVerificationField(label=_("Email"), required=False)
     email2 = EmailVerificationField(label=_("Email 2"), required=False)
@@ -327,7 +328,7 @@ class DirectoryForm(TendenciBaseForm):
                 self.logo_extension_error_message = _('The photo must be of jpg, gif, or png image type.')
                 self.logo_mime_error_message = _('The photo is an invalid image. Try uploading another photo.')
         self.fields['logo'].validators = [FileValidator(allowed_extensions=ALLOWED_LOGO_EXT)]
-            
+
 
         if not self.user.profile.is_superuser:
             if 'status_detail' in self.fields: self.fields.pop('status_detail')
@@ -349,7 +350,7 @@ class DirectoryForm(TendenciBaseForm):
         # cat and sub_cat
         self.fields['sub_cats'].queryset = DirectoryCategory.objects.exclude(parent=None)
         self.fields['sub_cats'].choices = _get_sub_cats_choices(directory=self.instance)
-        
+
         if self.user.profile.is_superuser:
             self.fields['sub_cats'].help_text = mark_safe('<a href="{}">{}</a>'.format(
                                         reverse('admin:directories_category_changelist'),
@@ -396,11 +397,11 @@ class DirectoryForm(TendenciBaseForm):
                 self.fields['cats'].help_text += mark_safe('<br /><a href="{}">{}</a>'.format(
                             reverse('admin:directories_category_changelist'),
                             _('Manage Categories'),))
- 
+
         # not to show list_type field if no premium price
         if not DirectoryPricing.objects.filter(status=True).filter(premium_price__gt=0).exists():
             if 'list_type' in self.fields:
-                del self.fields['list_type']      
+                del self.fields['list_type']
 
         if get_setting('site', 'global', 'stateusesdropdown'):
             self.fields['state'] = StateSelectField(label=self.fields['state'].label,

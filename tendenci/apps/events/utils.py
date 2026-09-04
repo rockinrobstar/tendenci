@@ -7,8 +7,9 @@ import math
 import time as ttime
 from datetime import datetime, timedelta
 from datetime import date
+from zoneinfo import ZoneInfo
 import csv
-from dateutil_rs.rrule import rrule, DAILY, WEEKLY, MONTHLY, YEARLY
+from dateutil.rrule import rrule, DAILY, WEEKLY, MONTHLY, YEARLY
 from decimal import Decimal
 import dateutil.parser as dparser
 
@@ -26,8 +27,10 @@ from django.template.loader import render_to_string
 import simplejson
 from django.utils.html import strip_tags
 from django.utils.translation import gettext as _
-from pytz import UnknownTimeZoneError
 from django.utils import timezone
+from django.utils.formats import date_format
+
+# from pytz import UnknownTimeZoneError
 
 from tendenci.apps.events.models import (Event, Place, Speaker, Organizer, Sponsor,
     Registration, RegistrationConfiguration, Registrant, RegConfPricing,
@@ -52,7 +55,6 @@ except:
     notification = None
 
 
-VALID_DATE_FORMAT = "%m/%d/%Y %H:%M:%S"
 EVENT_FIELDS = [
     "type",
     "title",
@@ -76,10 +78,13 @@ PLACE_FIELDS = [
     "place__url",
 ]
 
+VALID_DATE_FORMAT = settings.SHORT_DATETIME_FORMAT
+LOCAL_TIMEZONE = ZoneInfo(settings.TIME_ZONE)
+ICAL_DATE_TIME_FORMAT = '%Y%m%dT%H%M%SZ'
 
 def iter_child_event_registrants(child_event_registrants):
     field_labels = [_('First Name'),
-                    _('Last Name'), 
+                    _('Last Name'),
                     _('Phone'),
                     _('Email'),
                     _('Company'),
@@ -88,7 +93,7 @@ def iter_child_event_registrants(child_event_registrants):
                     _('Meeting Check In Date/Time'),
                     _('Session Check In Date/Time'),
                     _('Check In')]
-    
+
     writer = csv.DictWriter(Echo(), fieldnames=field_labels)
     # write headers - labels
     yield writer.writerow(dict(zip(field_labels, field_labels)))
@@ -111,7 +116,7 @@ def iter_child_event_registrants(child_event_registrants):
 
 def iter_registrant_credits(registrant_credits):
     field_labels = [_('First Name'),
-                    _('Last Name'), 
+                    _('Last Name'),
                     _('Event Code'),
                     _('Event'),
                     _('Credit Name'),
@@ -120,7 +125,7 @@ def iter_registrant_credits(registrant_credits):
     if get_setting('module', 'events', 'showmembernumber2'):
         field_labels.append(get_setting('module', 'users', 'membernumber2label'))
     field_labels.append(_('Released'))
-    
+
     writer = csv.DictWriter(Echo(), fieldnames=field_labels)
     # write headers - labels
     yield writer.writerow(dict(zip(field_labels, field_labels)))
@@ -185,15 +190,15 @@ def do_events_financial_export(**kwargs):
     if event_type:
         events = events.filter(type_id=event_type)
     events = events.order_by('{}{}'.format(sort_direction, sort_by))
-    
+
     show_discount_count = False
     for event in events:
         if event.discount_count > 0:
             show_discount_count = True
             break
-    
+
     currency_symbol = get_setting('site', 'global', 'currencysymbol')
-    
+
     field_list = ['Event ID', 'Event Title', 'Event Date', 'Group Name',
                   '# of Registrants',]
     if show_discount_count:
@@ -207,7 +212,7 @@ def do_events_financial_export(**kwargs):
     with default_storage.open(file_name_temp, 'w') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(field_list)
-        
+
         for event in events:
             groups = ', '.join(event.groups.values_list('name', flat=True))
             row = [event.id, event.title, event.start_dt, groups,
@@ -218,12 +223,12 @@ def do_events_financial_export(**kwargs):
                     event.addons_total, event.money_total,
                     event.money_collected, event.money_outstanding]
             csv_writer.writerow(row)
-            
+
     # rename the file name
     file_name = 'export/events/%s.csv' % identifier
     default_storage.save(file_name, default_storage.open(file_name_temp, 'rb'))
     print('Done. ', file_name)
-    
+
     # notify user that export is ready to download
     [user] = User.objects.filter(pk=user_id)[:1] or [None]
     if user and validate_email(user.email):
@@ -254,8 +259,8 @@ def do_events_financial_export(**kwargs):
 
     # delete the temp file
     default_storage.delete(file_name_temp)
-    
-    
+
+
 
 def render_event_email(event, email, registrants=None):
     """
@@ -440,6 +445,21 @@ def get_ics_defaults():
 
     return ics_str
 
+def format_event_date_as_utc(event_date, tz):
+    if tz:
+        time_zone = ZoneInfo(f'{tz}')
+    else:
+        time_zone = LOCAL_TIMEZONE
+
+    # check if the event_date is timezone aware
+    if event_date.tzinfo is None or event_date.tzinfo.utcoffset(event_date) is None:
+        # not aware
+        event_date_time_utc = timezone.localtime(timezone.make_aware(event_date, time_zone), timezone.utc)
+    else:
+        event_date_time_utc = timezone.localtime(event_date, timezone.utc)
+
+    return event_date_time_utc.strftime(ICAL_DATE_TIME_FORMAT)
+
 def get_ievent(request, d, event_id):
     site_url = get_setting('site', 'global', 'siteurl')
 
@@ -470,20 +490,16 @@ def get_ievent(request, d, event_id):
     time_zone = event.timezone
     if not time_zone:
         time_zone = settings.TIME_ZONE
-        
+
     if event.start_dt:
-        start_dt = adjust_datetime_to_timezone(event.start_dt, time_zone, 'UTC')
-        start_dt = start_dt.strftime('%Y%m%dT%H%M%SZ')
-        e_str += "DTSTART:%s\r\n" % (start_dt)
+        e_str += "DTSTART:%s\r\n" % (format_event_date_as_utc(event.start_dt, event.timezone))
     if event.end_dt:
-        end_dt = adjust_datetime_to_timezone(event.end_dt, time_zone, 'UTC')
-        end_dt = end_dt.strftime('%Y%m%dT%H%M%SZ')
-        e_str += "DTEND:%s\r\n" % (end_dt)
+        e_str += "DTEND:%s\r\n" % (format_event_date_as_utc(event.end_dt, event.timezone))
 
     e_str += "CLASS:PUBLIC\r\n"
     e_str += "PRIORITY:5\r\n"
 
-    e_str += "DTSTAMP:{}\r\n".format(adjust_datetime_to_timezone(datetime.now(), time_zone, 'UTC').strftime('%Y%m%dT%H%M%SZ'))
+    e_str += "DTSTAMP:{}\r\n".format(datetime.now(timezone.utc).strftime(ICAL_DATE_TIME_FORMAT))
 
     e_str += "TRANSP:OPAQUE\r\n"
 
@@ -516,8 +532,8 @@ def get_vevents(user, d):
     filters = get_query_filters(user, 'events.view_event')
     events = Event.objects.filter(filters).filter(end_dt__gte=timezone.now())
     events = events.order_by('start_dt')
-    
-    dtstamp = adjust_datetime_to_timezone(datetime.now(), settings.TIME_ZONE, 'UTC').strftime('%Y%m%dT%H%M%SZ')
+
+    dtstamp = datetime.now(timezone.utc).strftime(ICAL_DATE_TIME_FORMAT)
 
     for event in events:
         e_str += "BEGIN:VEVENT\r\n"
@@ -531,18 +547,11 @@ def get_vevents(user, d):
             e_str += "\r\n"
 
         # date time
-        time_zone = event.timezone
-        if not time_zone:
-            time_zone = settings.TIME_ZONE
 
         if event.start_dt:
-            start_dt = adjust_datetime_to_timezone(event.start_dt, time_zone, 'GMT')
-            start_dt = start_dt.strftime('%Y%m%dT%H%M%SZ')
-            e_str += "DTSTART:%s\r\n" % (start_dt)
+            e_str += "DTSTART:%s\r\n" % (format_event_date_as_utc(event.start_dt, event.timezone))
         if event.end_dt:
-            end_dt = adjust_datetime_to_timezone(event.end_dt, time_zone, 'GMT')
-            end_dt = end_dt.strftime('%Y%m%dT%H%M%SZ')
-            e_str += "DTEND:%s\r\n" % (end_dt)
+            e_str += "DTEND:%s\r\n" % (format_event_date_as_utc(event.end_dt, event.timezone))
 
         # location
         if event.place:
@@ -595,7 +604,7 @@ def build_ical_text(event, d):
     ical_text += "Event Title: %s\n" % strip_tags(event.title)
 
     # start_dt
-    ical_text += 'Start Date / Time: {} {}\n'.format(event.start_dt.strftime('%b %d, %Y %H:%M %p'), event.timezone)
+    ical_text += f'Start Date / Time: {date_format(event.start_dt, "DATETIME_FORMAT")} {event.timezone}\n'
 
     # location
     if event.place:
@@ -636,7 +645,7 @@ def build_ical_text(event, d):
         ical_text += "http://www.weather.com/weather/monthly/%s\n\n" % (event.place.zip)
 
     ical_text += strip_tags((event.description).replace('&nbsp;', " ")) + '\n\n'
-    
+
     if reg8n_guid and reg8n_id:
         if Registration.objects.filter(guid=reg8n_guid, id=reg8n_id, event_id=event.id).exists():
             registration_email_text = event.registration_configuration.registration_email_text
@@ -664,7 +673,7 @@ def foldline(line, limit=75, fold_sep='\r\n '):
     line can be split between any two characters by inserting a CRLF
     immediately followed by a single linear white-space character (i.e.,
     SPACE or HTAB).
-    
+
     This function is copied from
     https://github.com/collective/icalendar/blob/master/src/icalendar/parser.py
     """
@@ -705,7 +714,7 @@ def build_ical_html(event, d):
     ical_html += '<div>%s</div><br />' % d['event_url']
 
     # start_dt
-    ical_html += '<div>When: {} {}</div>'.format(event.start_dt.strftime('%b %d, %Y %H:%M %p'), event.timezone)
+    ical_html += f'<div>When: {date_format(event.start_dt, "DATETIME_FORMAT")} {event.timezone}</div>'
 
 #    # sponsor
 #    sponsors = event.sponsor_set.all()
@@ -754,7 +763,7 @@ def build_ical_html(event, d):
         ical_html += "http://www.weather.com/weather/monthly/%s</div><br /><br />" % (event.place.zip)
 
     ical_html += '<div>%s</div>' % (event.description)
-    
+
     reg8n_guid = d.get('reg8n_guid')
     reg8n_id = d.get('reg8n_id')
     try:
@@ -1097,7 +1106,7 @@ def get_registrants_prices(*args):
 
             amount_list.append(amount)
             tax_list.append(amount * price.tax_rate)
-            
+
     # apply discount if any
     discount_code = reg_form.cleaned_data.get('discount_code', None)
     discount_amount = Decimal(0)
@@ -1841,7 +1850,7 @@ def copy_event(
             new_regconf.save()
             new_event.registration_configuration = new_regconf
             new_event.save()
-    
+
             #copy regconf pricings
             for pricing in old_regconf.regconfpricing_set.filter(status=True):
                 new_pricing = RegConfPricing.objects.create(
@@ -2000,8 +2009,8 @@ def event_import_process(import_i, preview=True):
                 invalid_reason = "INVALID DATE FORMAT. SHOULD BE: %s" % VALID_DATE_FORMAT
 
             try:
-                timezone(event_object_dict["timezone"])
-            except UnknownTimeZoneError as e:
+                ZoneInfo(event_object_dict["timezone"])
+            except ValueError as e:
                 invalid = True
                 invalid_reason = "UNKNOWN TIMEZONE %s" % event_object_dict["timezone"]
 
@@ -2193,15 +2202,15 @@ def create_member_registration(user, event, form, for_member=False):
                  'owner': user}
 
     if for_member:
-        member_ids = [mem_id.strip() for mem_id in form.cleaned_data['member_ids'].split(',')]
+        member_ids = [mem_id.strip() for mem_id in form.cleaned_data['member_ids'].split(',') if mem_id.strip() !='']
         user_ids = Profile.objects.filter(member_number__in=member_ids,
                                           status_detail='active').values_list('user_id', flat=True)
     else:
         user_ids = [int(form.cleaned_data['user'])]
-    
-    registration_ids = []                                   
-    for user_id in user_ids: 
-        [user] = User.objects.filter(id=user_id)[:1] or [None]                                   
+
+    registration_ids = []
+    for user_id in user_ids:
+        [user] = User.objects.filter(id=user_id)[:1] or [None]
 
         if user:
             exists = event.registrants().filter(user=user)
@@ -2366,7 +2375,7 @@ def process_event_export(start_dt=None, end_dt=None, event_type=None,
                 value = str(value).replace(os.linesep, ' ').rstrip()
                 value = escape_csv(value)
                 data_row.append(value)
-    
+
             if event.place:
                 # place setup
                 place_d = full_model_to_dict(event.place)
@@ -2375,7 +2384,7 @@ def process_event_export(start_dt=None, end_dt=None, event_type=None,
                     value = str(value).replace(os.linesep, ' ').rstrip()
                     value = escape_csv(value)
                     data_row.append(value)
-    
+
             if event.registration_configuration:
                 # config setup
                 conf_d = full_model_to_dict(event.registration_configuration)
@@ -2388,7 +2397,7 @@ def process_event_export(start_dt=None, end_dt=None, event_type=None,
                     value = str(value).replace(os.linesep, ' ').rstrip()
                     value = escape_csv(value)
                     data_row.append(value)
-    
+
             if event.speaker_set.all():
                 # speaker setup
                 for speaker in event.speaker_set.all():
@@ -2398,13 +2407,13 @@ def process_event_export(start_dt=None, end_dt=None, event_type=None,
                         value = str(value).replace(os.linesep, ' ').rstrip()
                         value = escape_csv(value)
                         data_row.append(value)
-    
+
             # fill out the rest of the speaker columns
             if event.speaker_set.all().count() < max_speakers:
                 for i in range(0, max_speakers - event.speaker_set.all().count()):
                     for field in speaker_fields:
                         data_row.append('')
-    
+
             if event.organizer_set.all():
                 # organizer setup
                 for organizer in event.organizer_set.all():
@@ -2414,13 +2423,13 @@ def process_event_export(start_dt=None, end_dt=None, event_type=None,
                         value = str(value).replace(os.linesep, ' ').rstrip()
                         value = escape_csv(value)
                         data_row.append(value)
-    
+
             # fill out the rest of the organizer columns
             if event.organizer_set.all().count() < max_organizers:
                 for i in range(0, max_organizers - event.organizer_set.all().count()):
                     for field in organizer_fields:
                         data_row.append('')
-    
+
             reg_conf = event.registration_configuration
             if reg_conf and reg_conf.regconfpricing_set.all():
                 # pricing setup
@@ -2434,13 +2443,13 @@ def process_event_export(start_dt=None, end_dt=None, event_type=None,
                         value = str(value).replace(os.linesep, ' ').rstrip()
                         value = escape_csv(value)
                         data_row.append(value)
-    
+
             # fill out the rest of the pricing columns
             if reg_conf and reg_conf.regconfpricing_set.all().count() < max_pricings:
                 for i in range(0, max_pricings - reg_conf.regconfpricing_set.all().count()):
                     for field in pricing_fields:
                         data_row.append('')
-    
+
             csv_writer.writerow(data_row)
 
 
@@ -2510,7 +2519,7 @@ def handle_registration_payment(reg8n, redirect_url_only=False):
         # offline payment:
         # send email; add message; redirect to confirmation
         reg8n.send_registrant_notification()
-        
+
         #email the admins as well
 
         # fix the price
