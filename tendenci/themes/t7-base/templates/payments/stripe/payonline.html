@@ -2,13 +2,11 @@
 {% load payments_tags %}
 {% load base_filters %}
 {% load styled_forms %}
-{% load static %}
-{% load i18n %}
 
 {% block extra_head %}
 {{ block.super }}
 <script type="text/javascript" src="https://js.stripe.com/v3/"></script>
-<link rel="stylesheet" href="{% static 'themes/t7-base/css/stripe.css' %}">
+<link rel="stylesheet" href="{% static 'css/stripe.css' %}">
 
 {% endblock %}
 
