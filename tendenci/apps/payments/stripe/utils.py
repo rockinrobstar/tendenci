@@ -67,6 +67,137 @@ def _charge_id_from_intent(payment_intent):
     return getattr(latest_charge, 'id', '') or ''
 
 
+def _stripe_object_id(value):
+    if not value:
+        return ''
+    if isinstance(value, str):
+        return value
+    return getattr(value, 'id', '') or ''
+
+
+def _failed_off_session_response(message, code=''):
+    text = (message or '')[:200]
+    return {
+        'status_detail': 'not approved',
+        'response_code': '0',
+        'response_reason_code': '0',
+        'result_code': 'Error',
+        'message_code': code or '',
+        'message_text': text,
+        'response_reason_text': message or '',
+    }
+
+
+def customer_off_session_payment_method_id(stripe_module, customer_id):
+    """Return a reusable PaymentMethod or legacy source id for off-session charges."""
+    if not customer_id:
+        return ''
+
+    customer = stripe_module.Customer.retrieve(customer_id)
+    invoice_settings = getattr(customer, 'invoice_settings', None)
+    default_pm = _stripe_object_id(
+        getattr(invoice_settings, 'default_payment_method', None)
+        if invoice_settings else None
+    )
+    if default_pm:
+        return default_pm
+
+    payment_methods = []
+    try:
+        listed = stripe_module.PaymentMethod.list(
+            customer=customer_id, limit=10)
+        payment_methods = getattr(listed, 'data', None) or []
+    except Exception:
+        try:
+            listed = stripe_module.PaymentMethod.list(
+                customer=customer_id, type='card', limit=10)
+            payment_methods = getattr(listed, 'data', None) or []
+        except Exception:
+            payment_methods = []
+
+    if payment_methods:
+        return _stripe_object_id(payment_methods[0])
+
+    return _stripe_object_id(getattr(customer, 'default_source', None))
+
+
+def charge_customer_off_session(stripe_module, payment, customer_id,
+                                description=None):
+    """
+    Confirm an off-session PaymentIntent for a saved customer.
+
+    Returns (success, response_d). Does not set payment_method_types.
+    """
+    configure_stripe(stripe_module)
+    currency = get_setting('site', 'global', 'currency')
+
+    try:
+        payment_method_id = customer_off_session_payment_method_id(
+            stripe_module, customer_id)
+    except Exception as e:
+        return False, _failed_off_session_response(str(e))
+
+    if not payment_method_id:
+        return False, _failed_off_session_response(
+            'No payment method is on file for this customer.')
+
+    params = build_payment_intent_params(
+        payment, currency, customer_id=customer_id)
+    if description:
+        params['description'] = description
+    params['payment_method'] = payment_method_id
+    params['confirm'] = True
+    params['off_session'] = True
+
+    try:
+        payment_intent = stripe_module.PaymentIntent.create(**params)
+    except stripe_module.error.CardError as e:
+        json_body = getattr(e, 'json_body', None) or {}
+        err = json_body.get('error') if isinstance(json_body, dict) else None
+        err = err or {}
+        code = err.get('code') or getattr(e, 'code', '') or ''
+        message = (
+            err.get('message')
+            or getattr(e, 'user_message', None)
+            or str(e)
+        )
+        text = '{message} status={status}, code={code}'.format(
+            message=message,
+            status=getattr(e, 'http_status', ''),
+            code=code,
+        )
+        response = _failed_off_session_response(text, code=code)
+        response['payment_method_id'] = payment_method_id
+        return False, response
+    except Exception as e:
+        response = _failed_off_session_response(str(e))
+        response['payment_method_id'] = payment_method_id
+        return False, response
+
+    if getattr(payment_intent, 'status', None) == 'succeeded':
+        return True, {
+            'status_detail': 'approved',
+            'response_code': '1',
+            'response_subcode': '1',
+            'response_reason_code': '1',
+            'response_reason_text': (
+                'This transaction has been approved. (Created# %s)'
+                % payment_intent.created
+            ),
+            'trans_id': _charge_id_from_intent(payment_intent),
+            'result_code': 'Ok',
+            'message_code': '',
+            'message_text': 'Successful.',
+            'payment_method_id': payment_method_id,
+        }
+
+    response = _failed_off_session_response(
+        'PaymentIntent status=%s' % getattr(payment_intent, 'status', ''))
+    response['payment_method_id'] = payment_method_id
+    response['trans_id'] = _charge_id_from_intent(payment_intent)
+    return False, response
+
+
 def payment_update_from_intent(request, payment_intent, payment):
     """Approve a Payment from a succeeded PaymentIntent; store Charge id."""
     if getattr(payment_intent, 'status', None) == 'succeeded':

@@ -2,7 +2,6 @@ import uuid
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal
-import math
 import stripe
 from zoneinfo import ZoneInfo
 from django.db import models
@@ -24,7 +23,10 @@ from tendenci.apps.recurring_payments.managers import RecurringPaymentManager
 #from tendenci.apps.recurring_payments.authnet.utils import direct_response_dict
 from tendenci.apps.payments.models import Payment
 from tendenci.apps.site_settings.utils import get_setting
-from tendenci.apps.payments.stripe.utils import configure_stripe
+from tendenci.apps.payments.stripe.utils import (
+    charge_customer_off_session,
+    configure_stripe,
+)
 from tendenci.apps.payments.authorizenet.utils import AuthNetAPI
 
 
@@ -653,63 +655,14 @@ class RecurringPaymentInvoice(models.Model):
 
         # charge user
         if  self.recurring_payment.platform == "stripe":
-            configure_stripe(stripe)
-            params = {
-                       'amount': math.trunc(amount * 100), # amount in cents, again
-                       'currency': get_setting('site', 'global', 'currency'),
-                       'description': description,
-                       'customer': self.recurring_payment.customer_profile_id
-                      }
-
-            # Check if this transaction should be made to a connected account
-            connected_account_id, scope = payment.invoice.stripe_connected_account()
-            if connected_account_id:
-                stripe.client_id = get_setting('module', 'payments', 'stripe_connect_client_id')
-                if scope == 'express':
-                    # is there application fee (application_fee_amount)?
-                    application_fee = payment.invoice.get_stripe_application_fee(payment.amount)
-                    params.update({
-                                    'application_fee_amount': math.trunc(application_fee * 100),
-                                    "transfer_data": {"destination": connected_account_id
-                                }},)
-                else:
-                    params.update({'stripe_account': connected_account_id})
-
-            success = False
-            response_d = {
-                          'status_detail': 'not approved',
-                          'response_code': '0',
-                          'response_reason_code': '0',
-                          'result_code': 'Error',  # Error, Ok
-                          'message_code': '',    # I00001, E00027
-                          }
-            try:
-                charge_response = stripe.Charge.create(**params)
-                success = True
-                response_d['status_detail'] = 'approved'
-                response_d['response_code'] = '1'
-                response_d['response_subcode'] = '1'
-                response_d['response_reason_code'] = '1'
-                response_d['response_reason_text'] = 'This transaction has been approved. (Created# %s)' % charge_response.created
-                response_d['trans_id'] = charge_response.id
-                response_d['result_code'] = 'Ok'
-                response_d['message_text'] = 'Successful.'
-            except stripe.error.CardError as e:
-                # it's a decline
-                json_body = e.json_body
-                err  = json_body and json_body['error']
-                code = err and err['code']
-                message = err and err['message']
-                charge_response = '{message} status={status}, code={code}'.format(
-                            message=message, status=e.http_status, code=code)
-
-                response_d['response_reason_text'] = charge_response
-                response_d['message_code'] = code
-                response_d['message_text'] = charge_response
-            except Exception as e:
-                charge_response = e.message
-                response_d['response_reason_text'] = charge_response
-                response_d['message_text'] = charge_response[:200]
+            success, response_d = charge_customer_off_session(
+                stripe,
+                payment,
+                self.recurring_payment.customer_profile_id,
+                description=description,
+            )
+            if not payment_profile_id:
+                payment_profile_id = response_d.get('payment_method_id') or ''
 
             # update payment
             for key in response_d:
