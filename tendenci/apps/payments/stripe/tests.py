@@ -184,7 +184,8 @@ class ChargeCustomerOffSessionTests(TestCase):
         )
 
         ok, response = charge_customer_off_session(
-            stripe_module, payment, 'cus_1', description='Renewal')
+            stripe_module, payment, 'cus_1', description='Renewal',
+            idempotency_key='tendenci-rp-invoice-3-2500')
 
         self.assertTrue(ok)
         self.assertEqual(response['status_detail'], 'approved')
@@ -193,7 +194,57 @@ class ChargeCustomerOffSessionTests(TestCase):
         self.assertTrue(create_kwargs['confirm'])
         self.assertTrue(create_kwargs['off_session'])
         self.assertEqual(create_kwargs['payment_method'], 'pm_card')
+        self.assertEqual(
+            create_kwargs['idempotency_key'], 'tendenci-rp-invoice-3-2500')
         self.assertNotIn('payment_method_types', create_kwargs)
+
+    @patch('tendenci.apps.payments.stripe.utils.get_setting', return_value='aud')
+    @patch('tendenci.apps.payments.stripe.utils.configure_stripe')
+    @patch('tendenci.apps.payments.stripe.utils.customer_off_session_payment_method_id',
+           return_value='pm_card')
+    def test_no_idempotency_key_when_not_supplied(
+            self, mock_pm, mock_configure, mock_currency):
+        payment = MagicMock()
+        payment.id = 9
+        payment.guid = 'guid-9'
+        payment.amount = Decimal('25.00')
+        payment.description = 'RP'
+        payment.invoice.stripe_connected_account.return_value = (None, None)
+
+        stripe_module = MagicMock()
+        stripe_module.PaymentIntent.create.return_value = SimpleNamespace(
+            status='succeeded', created=42, latest_charge='ch_x')
+
+        charge_customer_off_session(stripe_module, payment, 'cus_1')
+
+        self.assertNotIn(
+            'idempotency_key',
+            stripe_module.PaymentIntent.create.call_args.kwargs)
+
+    @patch('tendenci.apps.payments.stripe.utils.get_setting', return_value='aud')
+    @patch('tendenci.apps.payments.stripe.utils.configure_stripe')
+    @patch('tendenci.apps.payments.stripe.utils.customer_off_session_payment_method_id',
+           return_value='pm_card')
+    def test_standard_connect_looks_up_method_on_connected_account(
+            self, mock_pm, mock_configure, mock_currency):
+        payment = MagicMock()
+        payment.id = 9
+        payment.guid = 'guid-9'
+        payment.amount = Decimal('25.00')
+        payment.description = 'RP'
+        payment.invoice.stripe_connected_account.return_value = (
+            'acct_standard', 'standard')
+
+        stripe_module = MagicMock()
+        stripe_module.PaymentIntent.create.return_value = SimpleNamespace(
+            status='succeeded', created=42, latest_charge='ch_x')
+
+        charge_customer_off_session(stripe_module, payment, 'cus_1')
+
+        self.assertEqual(
+            mock_pm.call_args.kwargs['request_options'],
+            {'stripe_account': 'acct_standard'},
+        )
 
     @patch('tendenci.apps.payments.stripe.utils.get_setting', return_value='aud')
     @patch('tendenci.apps.payments.stripe.utils.configure_stripe')
